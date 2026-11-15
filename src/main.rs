@@ -674,13 +674,10 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
                 let s = step.get();
                 step.set(s + 1);
                 with_app(move |app| {
-                    match s % 4 {
-                        0 => app.ui.set_has_track(true),
-                        1 => app.fullscreen_app = true,
-                        2 => app.fullscreen_app = false,
-                        _ => app.ui.set_has_track(false),
-                    }
-                    app.layout();
+                    // Simula tocar/pausar: a pílula troca de música para relógio e muda de tamanho.
+                    app.ui.set_has_track(true);
+                    app.ui.set_playing(s % 2 == 0);
+                    app.update_compact();
                 })
             });
         }

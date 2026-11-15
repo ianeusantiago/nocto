@@ -116,7 +116,9 @@ pub fn set_region(raw: isize, x: f32, width: f32, height: f32, radius: f32) {
             d,
             d,
         );
-        SetWindowRgn(h(raw), Some(rgn), true);
+        // Sem "repintar": o Windows apagaria o fundo da janela com branco e o Slint só
+        // redesenha a ilha (apareciam a caixa e as barras brancas).
+        SetWindowRgn(h(raw), Some(rgn), false);
     }
 }
 
@@ -124,7 +126,7 @@ pub fn set_region(raw: isize, x: f32, width: f32, height: f32, radius: f32) {
 /// não aparece nem pega cliques.
 pub fn clear_region(raw: isize) {
     unsafe {
-        SetWindowRgn(h(raw), Some(CreateRectRgn(0, 0, 0, 0)), true);
+        SetWindowRgn(h(raw), Some(CreateRectRgn(0, 0, 0, 0)), false);
     }
 }
 
@@ -144,6 +146,35 @@ pub fn activate(raw: isize) {
     }
 }
 
+/// A janela é de um programa de captura de tela?
+fn is_capture_tool(hwnd: HWND) -> bool {
+    const TOOLS: [&str; 7] = [
+        "screenclippinghost.exe",
+        "snippingtool.exe",
+        "sharex.exe",
+        "lightshot.exe",
+        "greenshot.exe",
+        "flameshot.exe",
+        "screensketch.exe",
+    ];
+    unsafe {
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return false;
+        };
+        let mut buf = [0u16; 512];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+        let _ = CloseHandle(process);
+        if !ok {
+            return false;
+        }
+        let path = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
+        TOOLS.iter().any(|t| path.ends_with(t))
+    }
+}
+
 /// O app em primeiro plano ocupa o monitor inteiro (jogo, vídeo em tela cheia)?
 pub fn is_fullscreen(raw: isize) -> bool {
     unsafe {
@@ -160,6 +191,12 @@ pub fn is_fullscreen(raw: isize) -> bool {
         // Janela maximizada não é tela cheia (com a barra de tarefas oculta, ela também
         // cobre o monitor inteiro e escondia a ilha sem motivo).
         if IsZoomed(fg).as_bool() {
+            return false;
+        }
+        // Sobreposições de tela inteira que não são jogo (ferramenta de print, por
+        // exemplo): a ilha sumia justamente do print.
+        let ex = GetWindowLongPtrW(fg, GWL_EXSTYLE);
+        if ex & WS_EX_TOOLWINDOW.0 as isize != 0 || is_capture_tool(fg) {
             return false;
         }
         let mut r = RECT::default();

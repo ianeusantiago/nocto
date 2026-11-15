@@ -30,21 +30,27 @@ global Icons {
     out property <string> prev: "\u{E892}";
 }
 
-// Logo do Spotify desenhado em vetor (círculo verde com as três ondas).
+// Logo do Spotify: círculo verde com as três ondas pretas (forma oficial, em vetor).
 component SpotifyLogo inherits Rectangle {
-    in property <length> size: 22px;
+    in property <length> size: 24px;
     width: size;
     height: size;
-    border-radius: size / 2;
-    background: #1ed760;
+    // Fundo preto atrás: as ondas são "furos" no desenho verde.
+    Rectangle {
+        x: parent.width * 0.08;
+        y: parent.height * 0.08;
+        width: parent.width * 0.84;
+        height: parent.height * 0.84;
+        border-radius: self.width / 2;
+        background: #000000;
+    }
     Path {
         width: parent.width;
         height: parent.height;
         viewbox-width: 24;
         viewbox-height: 24;
-        stroke: #000000;
-        stroke-width: size / 12;
-        commands: "M6.6 9.4 C10.4 8.2 14.6 8.5 17.8 10.3 M7.4 12.5 C10.5 11.6 13.6 11.9 16.2 13.3 M8.2 15.4 C10.6 14.8 12.8 15.1 14.8 16.1";
+        fill: #1ed760;
+        commands: "M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z";
     }
 }
 
@@ -207,7 +213,7 @@ export component Island inherits Window {
                 alignment: stretch;
                 // Ícone: logo do Spotify, nota musical (outro player) ou relógio.
                 if root.show-music && root.spotify: SpotifyLogo {
-                    size: 22px;
+                    size: 24px;
                     y: (parent.height - self.height) / 2;
                 }
                 if root.show-music && !root.spotify: Rectangle {
@@ -420,7 +426,7 @@ export component Island inherits Window {
                                         horizontal-stretch: 1;
                                     }
                                     if root.spotify: SpotifyLogo {
-                                        size: 22px;
+                                        size: 28px;
                                         y: (parent.height - self.height) / 2;
                                     }
                                 }
@@ -443,7 +449,6 @@ export component Island inherits Window {
                                         height: parent.height;
                                         border-radius: 3px;
                                         background: root.ink;
-                                        animate width { duration: 900ms; }
                                     }
                                 }
                                 HorizontalLayout {
