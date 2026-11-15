@@ -11,6 +11,7 @@ use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::System::Threading::*;
 use windows::Win32::UI::Accessibility::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
@@ -76,12 +77,28 @@ pub fn spawn_hotkey(hk: Hotkey, on_press: impl Fn() + Send + 'static) -> Result<
     rx.recv().unwrap_or_else(|_| Err("falha ao registrar o atalho".into()))
 }
 
-/// Esconde da barra de tarefas e do Alt+Tab. O vidro é feito em glass.rs.
+/// O winit esconde a moldura da janela, mas mantém por baixo os estilos de barra de
+/// título e borda. Ao ganhar ou perder o foco, o Windows repintava essa barra (branca,
+/// com "Nocto" e X) por um instante. Aqui essa pintura é bloqueada.
+unsafe extern "system" fn no_frame_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, _data: usize) -> LRESULT {
+    unsafe {
+        match msg {
+            WM_NCPAINT => LRESULT(0),
+            // lParam = -1: o Windows atualiza o estado de ativo/inativo sem repintar a moldura.
+            WM_NCACTIVATE => DefSubclassProc(hwnd, msg, wp, LPARAM(-1)),
+            _ => DefSubclassProc(hwnd, msg, wp, lp),
+        }
+    }
+}
+
+/// Esconde da barra de tarefas e do Alt+Tab e bloqueia a pintura da moldura padrão.
+/// O vidro é feito em glass.rs.
 pub fn setup(raw: isize) {
     unsafe {
         let hwnd = h(raw);
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize));
+        let _ = SetWindowSubclass(hwnd, Some(no_frame_proc), 1, 0);
     }
 }
 
