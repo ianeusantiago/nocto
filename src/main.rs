@@ -343,6 +343,26 @@ impl App {
                     });
                 });
             }
+            Command::SpotifyPlaylist(name) => {
+                self.set_status(&format!("Procurando a playlist \"{name}\"…"), false);
+                let cfg = self.spotify_config();
+                std::thread::spawn(move || {
+                    let result = spotify::play_playlist(&cfg, &name);
+                    on_ui(move |app| match result {
+                        Ok(msg) => {
+                            app.set_status(&msg, false);
+                            slint::Timer::single_shot(Duration::from_millis(1500), || {
+                                with_app(|app| {
+                                    if app.ui.get_mode() == BAR {
+                                        app.close(true);
+                                    }
+                                })
+                            });
+                        }
+                        Err(e) => app.set_status(&e, true),
+                    });
+                });
+            }
             Command::SpotifyPause => {
                 media::play_pause();
                 self.close(true);

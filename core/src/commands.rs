@@ -6,6 +6,7 @@ pub enum Command {
     OpenUrl(String),
     OpenFolder(String),
     SpotifyPlay(String),
+    SpotifyPlaylist(String),
     SpotifyPause,
     SpotifyNext,
     SpotifyLogin,
@@ -70,7 +71,15 @@ pub fn parse(input: &str) -> Command {
         return Command::Unknown(input.to_string());
     }
     if PLAY.contains(&verb) {
-        return Command::SpotifyPlay(rest.to_lowercase());
+        let lower = rest.to_lowercase();
+        for prefix in ["playlist ", "a playlist ", "minha playlist ", "a minha playlist "] {
+            if let Some(name) = lower.strip_prefix(prefix) {
+                if !name.trim().is_empty() {
+                    return Command::SpotifyPlaylist(name.trim().to_string());
+                }
+            }
+        }
+        return Command::SpotifyPlay(lower);
     }
     if OPEN.contains(&verb) {
         return open_target(rest);
@@ -158,5 +167,19 @@ mod more_tests {
     fn spotify_login() {
         assert_eq!(parse("login spotify"), Command::SpotifyLogin);
         assert_eq!(parse("conectar spotify"), Command::SpotifyLogin);
+    }
+}
+
+#[cfg(test)]
+mod playlist_tests {
+    use super::*;
+
+    #[test]
+    fn playlist_command() {
+        assert_eq!(parse("toca playlist only day"), Command::SpotifyPlaylist("only day".into()));
+        assert_eq!(parse("Toca a playlist Only Day"), Command::SpotifyPlaylist("only day".into()));
+        assert_eq!(parse("tocar minha playlist only day"), Command::SpotifyPlaylist("only day".into()));
+        assert_eq!(parse("toca playlist"), Command::SpotifyPlay("playlist".into()));
+        assert_eq!(parse("toca ghost town"), Command::SpotifyPlay("ghost town".into()));
     }
 }

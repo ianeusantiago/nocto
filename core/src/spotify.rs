@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const REDIRECT: &str = "http://127.0.0.1:8898/callback";
-const SCOPES: &str = "user-modify-playback-state user-read-playback-state";
+const SCOPES: &str = "user-modify-playback-state user-read-playback-state playlist-read-private playlist-read-collaborative";
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -71,6 +71,9 @@ pub fn play_error(status: u16, body: &str) -> String {
         .ok()
         .and_then(|v| v["error"]["reason"].as_str().map(str::to_string))
         .unwrap_or_default();
+    if status == 403 && body.to_lowercase().contains("scope") {
+        return "o Nocto precisa de uma permissão nova do Spotify: digite conectar spotify".into();
+    }
     match (status, reason.as_str()) {
         (401, _) => "sessão expirada: faça login no Spotify de novo".into(),
         (_, "PREMIUM_REQUIRED") => "o Spotify exige conta Premium para isso".into(),
@@ -366,6 +369,82 @@ pub fn best_track(json: &str, query: &str) -> Option<Track> {
     best.map(|(_, t)| t)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Playlist {
+    pub name: String,
+    pub uri: String,
+}
+
+/// Escolhe a playlist pelo nome: igual (sem diferenciar maiúsculas, acentos e espaços)
+/// ganha de "contém", que ganha de "tem todas as palavras".
+pub fn pick_playlist(json: &str, query: &str) -> Option<Playlist> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    let q = norm(query);
+    let qc = q.replace(' ', "");
+    if qc.is_empty() {
+        return None;
+    }
+    let mut best: Option<(i32, Playlist)> = None;
+    for item in v["items"].as_array()? {
+        let (Some(name), Some(uri)) = (item["name"].as_str(), item["uri"].as_str()) else { continue };
+        let n = norm(name);
+        let nc = n.replace(' ', "");
+        let score = if nc == qc {
+            300
+        } else if nc.contains(&qc) {
+            200 - (nc.len() as i32 - qc.len() as i32).min(100)
+        } else if q.split(' ').all(|w| n.split(' ').any(|x| x == w)) {
+            100
+        } else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(s, _)| score > *s) {
+            best = Some((score, Playlist { name: name.into(), uri: uri.into() }));
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+/// Toca uma playlist sua pelo nome. Retorna "Tocando a playlist …".
+pub fn play_playlist(cfg: &Config, name: &str) -> Result<String, String> {
+    if cfg.client_id.is_empty() {
+        return Err(missing_id());
+    }
+    let auth = format!("Bearer {}", access_token(cfg)?);
+    // Junta até 200 playlists (4 páginas de 50).
+    let mut all = Vec::new();
+    let mut url = Some("https://api.spotify.com/v1/me/playlists?limit=50".to_string());
+    for _ in 0..4 {
+        let Some(u) = url.take() else { break };
+        let v: Value = serde_json::from_str(&get(&auth, &u)?).unwrap_or_default();
+        if let Some(items) = v["items"].as_array() {
+            all.extend(items.iter().cloned());
+        }
+        url = v["next"].as_str().map(str::to_string);
+    }
+    let json = serde_json::json!({ "items": all }).to_string();
+    let playlist = pick_playlist(&json, name).ok_or_else(|| format!("não achei a playlist \"{name}\" nas suas playlists"))?;
+    let device = match active_device(&get(&auth, "https://api.spotify.com/v1/me/player")?) {
+        Some(id) => Some(id),
+        None => pick_device(&get(&auth, "https://api.spotify.com/v1/me/player/devices")?),
+    };
+    let url = match &device {
+        Some(id) => format!("https://api.spotify.com/v1/me/player/play?device_id={}", enc(id)),
+        None => "https://api.spotify.com/v1/me/player/play".into(),
+    };
+    let mut resp = agent()
+        .put(&url)
+        .header("Authorization", &auth)
+        .header("Content-Type", "application/json")
+        .send(serde_json::json!({ "context_uri": playlist.uri }).to_string())
+        .map_err(|e| format!("sem conexão: {e}"))?;
+    let status = resp.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(play_error(status, &resp.body_mut().read_to_string().unwrap_or_default()));
+    }
+    Ok(format!("Tocando a playlist {}", playlist.name))
+}
+
 /// Aparelho do player atual, se houver um tocando ou pausado.
 pub fn active_device(json: &str) -> Option<String> {
     let v: Value = serde_json::from_str(json).ok()?;
@@ -514,5 +593,38 @@ mod payload_tests {
     fn search_result_carries_album() {
         let json = r#"{"tracks":{"items":[{"name":"Ghost Town","uri":"spotify:track:1","album":{"uri":"spotify:album:9"},"artists":[{"name":"Kanye West"}]}]}}"#;
         assert_eq!(best_track(json, "ghost town").unwrap().album.as_deref(), Some("spotify:album:9"));
+    }
+}
+
+#[cfg(test)]
+mod playlist_tests {
+    use super::*;
+
+    fn lists(names: &[&str]) -> String {
+        let items: Vec<_> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| serde_json::json!({"name": n, "uri": format!("spotify:playlist:{i}")}))
+            .collect();
+        serde_json::json!({ "items": items, "next": null }).to_string()
+    }
+
+    #[test]
+    fn exact_name_wins_ignoring_case_and_spaces() {
+        let json = lists(&["Daily Mix 1", "Only Day", "Only Day Remix"]);
+        assert_eq!(pick_playlist(&json, "only day").unwrap().name, "Only Day");
+        assert_eq!(pick_playlist(&json, "onlyday").unwrap().uri, "spotify:playlist:1");
+    }
+    #[test]
+    fn partial_match_and_missing() {
+        let json = lists(&["Músicas pra treinar", "Lo-fi"]);
+        assert_eq!(pick_playlist(&json, "treinar").unwrap().name, "Músicas pra treinar");
+        assert!(pick_playlist(&json, "rock pesado").is_none());
+        assert!(pick_playlist("lixo", "x").is_none());
+    }
+    #[test]
+    fn asks_for_playlist_permission() {
+        assert!(auth_url("cid", "c", "s").contains("playlist-read-private"));
+        assert!(play_error(403, r#"{"error":{"message":"Insufficient client scope"}}"#).contains("conectar spotify"));
     }
 }
