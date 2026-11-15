@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod glass;
 mod media;
 mod win;
 
@@ -41,7 +42,13 @@ struct App {
     dropped: Option<PathBuf>,
     /// Um app em tela cheia (ex.: jogo) está na frente: a pílula some.
     fullscreen_app: bool,
+    glass: Option<glass::Glass>,
+    last_shape: std::cell::Cell<(f32, f32)>,
 }
+
+/// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
+const WINDOW_W: f32 = 720.0;
+const WINDOW_H: f32 = 360.0;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -75,20 +82,61 @@ fn iso_today() -> String {
 }
 
 impl App {
-    fn layout(&self) {
+    /// A janela da interface e, atrás dela, a do vidro.
+    fn hwnds(&self) -> Vec<isize> {
+        std::iter::once(self.hwnd).chain(self.glass.as_ref().map(|g| g.hwnd)).collect()
+    }
+
+    fn region(&self, x: f32, w: f32, h: f32, r: f32) {
+        for hwnd in self.hwnds() {
+            win::set_region(hwnd, x, w, h, r);
+        }
+    }
+
+    fn visible(&self, visible: bool) {
+        // O vidro primeiro, para a interface aparecer já por cima dele.
+        for hwnd in self.hwnds().into_iter().rev() {
+            win::show(hwnd, visible);
+        }
+    }
+
+    /// Largura, altura e raio (lógicos) da ilha em cada modo, como na Dynamic Island:
+    /// compacta quando parada, expandindo para barra, calendário ou soltar arquivo.
+    fn island_shape(&self) -> (f32, f32, f32) {
         let ui = &self.ui;
-        let mode = ui.get_mode();
-        let (w, h) = match mode {
-            BAR if ui.get_status().is_empty() => (580.0, 60.0),
-            BAR => (580.0, 88.0),
-            CALENDAR => (660.0, 340.0),
-            DROP => (420.0, 128.0),
-            _ if ui.get_has_track() => (340.0, 40.0),
-            _ => (230.0, 40.0),
-        };
-        let radius = if mode == PILL { h / 2.0 } else { 22.0 };
-        win::place(self.hwnd, w, h, ui.window().scale_factor(), radius);
-        win::show(self.hwnd, !(mode == PILL && self.fullscreen_app));
+        match ui.get_mode() {
+            BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
+            BAR => (600.0, 86.0, 32.0),
+            CALENDAR => (680.0, 340.0, 40.0),
+            DROP => (440.0, 128.0, 36.0),
+            _ if ui.get_has_track() => (360.0, 38.0, 19.0),
+            _ => (230.0, 34.0, 17.0),
+        }
+    }
+
+    fn layout(&self) {
+        let (w, h, r) = self.island_shape();
+        let scale = self.ui.window().scale_factor();
+        let x = (WINDOW_W - w) / 2.0;
+        self.ui.set_island_w(w);
+        self.ui.set_island_h(h);
+        if let Some(glass) = &self.glass {
+            let _ = glass.set_shape(x * scale, w * scale, h * scale, r * scale, true);
+        }
+        // Durante o morph a área clicável cobre o maior dos dois formatos; no fim, o exato.
+        let (pw, ph) = self.last_shape.replace((w, h));
+        let (uw, uh) = (w.max(pw), h.max(ph));
+        self.region((WINDOW_W - uw) / 2.0 * scale, uw * scale, (uh + 8.0) * scale, r * scale);
+        let shape = (w, h, r);
+        slint::Timer::single_shot(Duration::from_millis(glass::MORPH_MS as u64 + 80), move || {
+            with_app(move |app| {
+                if app.island_shape() == shape {
+                    let x = (WINDOW_W - w) / 2.0 * scale;
+                    app.region(x, w * scale, h * scale, r * scale);
+                }
+            })
+        });
+        self.visible(!(self.ui.get_mode() == PILL && self.fullscreen_app));
     }
 
     fn set_mode(&mut self, mode: i32) {
@@ -109,6 +157,10 @@ impl App {
         let (_, _, _, h, m, _) = win::local_time();
         let p = theme::palette(self.config.theme.resolve(h, m));
         self.ui.set_glass(color(p.glass));
+        if let Some(glass) = &self.glass {
+            let [r, g, b, a] = p.glass;
+            let _ = glass.set_tint([a, r, g, b], 3000);
+        }
         self.ui.set_accent(color(p.accent));
         self.ui.set_ink(color(p.text));
         self.ui.set_theme_label(self.config.theme.label().into());
@@ -298,7 +350,7 @@ impl App {
         if full != self.fullscreen_app {
             self.fullscreen_app = full;
             if self.ui.get_mode() == PILL {
-                win::show(self.hwnd, !full);
+                self.visible(!full);
             }
         }
         self.apply_theme();
@@ -457,6 +509,11 @@ fn start_when_ready(ui: Island, config: Config, dir: PathBuf) {
 
 fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
     win::setup(hwnd);
+    win::place_fixed(hwnd, WINDOW_W, WINDOW_H, ui.window().scale_factor());
+    let glass = if std::env::var_os("NOCTO_NOGLASS").is_some() { None } else { glass::Glass::new(hwnd).ok() };
+    if let Some(g) = &glass {
+        win::place_fixed(g.hwnd, WINDOW_W, WINDOW_H, ui.window().scale_factor());
+    }
 
     let (y, m, ..) = win::local_time();
     let hotkey_text = config.hotkey.clone();
@@ -470,6 +527,8 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         prev_foreground: 0,
         dropped: None,
         fullscreen_app: false,
+        glass,
+        last_shape: std::cell::Cell::new((0.0, 0.0)),
         config,
         dir,
     };

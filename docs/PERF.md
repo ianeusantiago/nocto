@@ -9,10 +9,13 @@ Máquina: Ryzen 7 + RTX 4050, Windows 11. Medido com `scripts/measure.ps1` (work
 | 2026-11-15 | App completo, pílula parada (20 s) | 22,9 MB | 3,6 MB | 0,00% |
 | 2026-11-15 | Barra de comando aberta (15 s) | 23,1 MB | 3,7 MB | 0,00% |
 | 2026-11-15 | Calendário aberto (15 s) | 24,4 MB | 5,0 MB | 0,00% |
+| 2026-11-15 | v0.2: vidro do compositor + janela fixa, pílula parada (20 s) | 26,6 MB | 5,2 MB | 0,00% |
 
 Executável release: ~8,8 MB.
 
 ## Decisões
+
+- **Vidro pelo compositor do Windows (v0.2).** Desfoque, cor, brilho, borda de luz e morph rodam no compositor, numa janela própria atrás da interface. Custo: ~4 MB a mais; CPU parada continua 0%. A ondinha da música redesenha enquanto toca.
 
 - **Renderizador por software.** O OpenGL (femtovg) custava ~100 MB a mais por carregar o driver de vídeo e foi removido do build. Também não disputa a GPU com jogos.
 - **Nada em loop.** O atalho dorme em `GetMessageW`; a música chega por evento do Windows; a troca de tema é uma thread dormindo até a próxima virada; a detecção de tela cheia é um hook de evento fora de processo. Com a ilha parada, o Slint não desenha nenhum quadro.

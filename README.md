@@ -1,8 +1,8 @@
 # Nocto
 
-Uma "Dynamic Island" para Windows, escrita em Rust. Uma pílula de vidro no topo da tela que vira barra de comando, calendário e conversor de imagens, e fica leve o bastante para não ser notada nem em jogo.
+Uma "Dynamic Island" para Windows, escrita em Rust. Uma ilha no estilo Dynamic Island, colada no topo da tela, com material de vidro inspirado no Liquid Glass, que vira barra de comando, calendário e conversor de imagens, e fica leve o bastante para não ser notada nem em jogo.
 
-**~23 MB de RAM e 0% de CPU parada** ([medições](docs/PERF.md)). Executável único de ~9 MB, sem navegador embutido.
+**~27 MB de RAM e 0% de CPU parada** ([medições](docs/PERF.md)). Executável único de ~9 MB, sem navegador embutido.
 
 ## O que faz
 
@@ -52,4 +52,4 @@ A lógica (comandos, calendário, tema, conversão, Spotify, configuração) fic
 - Jogos em **tela cheia exclusiva** não mostram janelas sobrepostas. Em janela sem borda funciona.
 - O desfoque usa uma API não documentada do Windows (`SetWindowCompositionAttribute`), que funciona no Windows 10 1803+ e no 11.
 - Se um jogo entra em tela cheia sem trocar de janela (Alt+Enter), a pílula só some na próxima troca de foco.
-- As bordas da janela são recortadas por região do Windows, então o contorno externo não tem antisserrilhado.
+- O vidro precisa dos "Efeitos de transparência" ligados no Windows; sem eles, a ilha fica com cor sólida.

@@ -43,6 +43,17 @@ fn shell_open(target: &str) -> Result<(), String> {
         .map_err(|e| format!("não consegui abrir: {e}"))
 }
 
+/// Abre um endereço no navegador padrão. O `explorer.exe` não entende URLs longas com `&`
+/// (abria a pasta Documentos); o manipulador de protocolo do Windows entende.
+pub fn open_url(url: &str) -> Result<(), String> {
+    Process::new("rundll32.exe")
+        .arg("url.dll,FileProtocolHandler")
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("não consegui abrir o navegador: {e}"))
+}
+
 fn safe_url(url: &str) -> bool {
     let lower = url.to_lowercase();
     (lower.starts_with("https://") || lower.starts_with("http://"))
@@ -68,7 +79,7 @@ pub fn run(cmd: &Command, allow: &Allowlist) -> Result<(), String> {
             if !safe_url(url) {
                 return Err("endereço inválido".into());
             }
-            shell_open(url)
+            open_url(url)
         }
         Command::OpenFolder(path) => {
             if !Path::new(path).is_dir() {

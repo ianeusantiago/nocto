@@ -6,13 +6,13 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
-use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+
 use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::System::Threading::*;
 use windows::Win32::UI::Accessibility::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{s, w};
+use windows::core::w;
 
 pub fn hwnd_of(window: &slint::Window) -> Option<isize> {
     use slint::winit_030::WinitWindowAccessor;
@@ -76,47 +76,18 @@ pub fn spawn_hotkey(hk: Hotkey, on_press: impl Fn() + Send + 'static) -> Result<
     rx.recv().unwrap_or_else(|_| Err("falha ao registrar o atalho".into()))
 }
 
-#[repr(C)]
-struct AccentPolicy {
-    state: u32,
-    flags: u32,
-    gradient: u32,
-    animation: u32,
-}
-
-#[repr(C)]
-struct CompositionData {
-    attribute: u32,
-    data: *mut c_void,
-    size: usize,
-}
-
-type SetCompositionFn = unsafe extern "system" fn(HWND, *mut CompositionData) -> windows::core::BOOL;
-
-/// Esconde da barra de tarefas/Alt+Tab e liga o desfoque acrílico atrás da janela.
-/// O desfoque usa SetWindowCompositionAttribute (não documentada, Windows 10 1803+ e 11),
-/// que respeita a região arredondada da janela; a cor vem do próprio desenho do Slint.
+/// Esconde da barra de tarefas e do Alt+Tab. O vidro é feito em glass.rs.
 pub fn setup(raw: isize) {
     unsafe {
         let hwnd = h(raw);
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize));
-        let Ok(user32) = GetModuleHandleW(w!("user32.dll")) else { return };
-        let Some(f) = GetProcAddress(user32, s!("SetWindowCompositionAttribute")) else { return };
-        let f: SetCompositionFn = std::mem::transmute(f);
-        // ACCENT_ENABLE_ACRYLICBLURBEHIND = 4; tinta quase transparente (formato AABBGGRR).
-        let mut policy = AccentPolicy { state: 4, flags: 0, gradient: 0x0100_0000, animation: 0 };
-        let mut data = CompositionData {
-            attribute: 19, // WCA_ACCENT_POLICY
-            data: &mut policy as *mut _ as *mut c_void,
-            size: std::mem::size_of::<AccentPolicy>(),
-        };
-        let _ = f(hwnd, &mut data);
     }
 }
 
-/// Centraliza no topo do monitor, aplica o tamanho e recorta a forma arredondada.
-pub fn place(raw: isize, width: f32, height: f32, scale: f32, radius: f32) {
+/// Janela fixa, colada no topo do monitor e centralizada. É posicionada uma única vez:
+/// depois disso só a ilha muda de forma dentro dela (nada de redimensionar a janela).
+pub fn place_fixed(raw: isize, width: f32, height: f32, scale: f32) {
     unsafe {
         let hwnd = h(raw);
         let mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
@@ -124,12 +95,28 @@ pub fn place(raw: isize, width: f32, height: f32, scale: f32, radius: f32) {
         let _ = GetMonitorInfoW(mon, &mut mi);
         let pw = (width * scale).round() as i32;
         let ph = (height * scale).round() as i32;
-        let x = mi.rcWork.left + ((mi.rcWork.right - mi.rcWork.left) - pw) / 2;
-        let y = mi.rcMonitor.top + (10.0 * scale).round() as i32;
-        let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), x, y, pw, ph, SWP_NOACTIVATE);
-        let d = (radius * 2.0 * scale).round() as i32;
-        let rgn = CreateRoundRectRgn(0, 0, pw + 1, ph + 1, d, d);
-        SetWindowRgn(hwnd, Some(rgn), true);
+        let m = mi.rcMonitor;
+        let x = m.left + ((m.right - m.left) - pw) / 2;
+        let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), x, m.top, pw, ph, SWP_NOACTIVATE);
+    }
+}
+
+/// Área clicável = só a ilha (pixels físicos). O resto da janela deixa o clique passar
+/// para o que está atrás. A borda visível é desenhada pelo compositor (suave); esta
+/// região fica 2 px por fora, só para o clique.
+pub fn set_region(raw: isize, x: f32, width: f32, height: f32, radius: f32) {
+    unsafe {
+        let pad = 2;
+        let d = (radius * 2.0).round() as i32 + pad * 2;
+        let rgn = CreateRoundRectRgn(
+            x.round() as i32 - pad,
+            -d,
+            (x + width).round() as i32 + pad + 1,
+            height.round() as i32 + pad + 1,
+            d,
+            d,
+        );
+        SetWindowRgn(h(raw), Some(rgn), true);
     }
 }
 

@@ -23,6 +23,7 @@ pub struct Config {
 pub struct Track {
     pub uri: String,
     pub label: String,
+    pub album: Option<String>,
 }
 
 pub fn pkce_challenge(verifier: &str) -> String {
@@ -82,7 +83,11 @@ pub fn first_track(json: &str) -> Option<Track> {
     let v: Value = serde_json::from_str(json).ok()?;
     let t = v["tracks"]["items"].get(0)?;
     let artists: Vec<&str> = t["artists"].as_array()?.iter().filter_map(|a| a["name"].as_str()).collect();
-    Some(Track { uri: t["uri"].as_str()?.into(), label: format!("{} — {}", t["name"].as_str()?, artists.join(", ")) })
+    Some(Track {
+        uri: t["uri"].as_str()?.into(),
+        label: format!("{} — {}", t["name"].as_str()?, artists.join(", ")),
+        album: t["album"]["uri"].as_str().map(str::to_string),
+    })
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -120,6 +125,42 @@ fn token_request(cfg: &Config, form: &[(&str, &str)], old_refresh: Option<&str>)
     Ok(t)
 }
 
+/// Abre o login numa janela pop-up própria (modo app do Edge, presente em todo Windows 10/11);
+/// sem Edge, usa o navegador padrão.
+fn open_popup(url: &str) -> Result<(), String> {
+    let edge = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ];
+    if let Some(exe) = edge.iter().find(|p| std::path::Path::new(p).is_file()) {
+        let opened = std::process::Command::new(exe)
+            .arg(format!("--app={url}"))
+            .arg("--window-size=480,760")
+            .spawn()
+            .is_ok();
+        if opened {
+            return Ok(());
+        }
+    }
+    crate::launcher::open_url(url)
+}
+
+fn result_page(ok: bool) -> String {
+    let (title, text) = if ok {
+        ("Spotify conectado", "Pode fechar esta janela e voltar ao Nocto.")
+    } else {
+        ("Login não concluído", "Feche esta janela e tente de novo com “conectar spotify”.")
+    };
+    format!(
+        r#"<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Nocto</title>
+<body style="margin:0;height:100vh;display:grid;place-items:center;background:#0b2a44;color:#fff;font-family:'Segoe UI Variable','Segoe UI',sans-serif">
+<div style="text-align:center;padding:32px 40px;border-radius:24px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18)">
+<div style="font-size:40px;color:#2bb4ff">{icon}</div><h1 style="font-size:22px;margin:12px 0 6px">{title}</h1>
+<p style="margin:0;opacity:.75">{text}</p></div></body></html>"#,
+        icon = if ok { "✓" } else { "!" }
+    )
+}
+
 /// Abre o navegador para o login e espera o retorno em 127.0.0.1:8898 (até 2 min).
 pub fn login(cfg: &Config) -> Result<(), String> {
     if cfg.client_id.is_empty() {
@@ -129,23 +170,33 @@ pub fn login(cfg: &Config) -> Result<(), String> {
     let state = random_token();
     let listener = TcpListener::bind("127.0.0.1:8898").map_err(|e| format!("porta 8898 ocupada: {e}"))?;
     let url = auth_url(&cfg.client_id, &pkce_challenge(&verifier), &state);
-    std::process::Command::new("explorer.exe").arg(&url).spawn().map_err(|e| e.to_string())?;
+    open_popup(&url)?;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let deadline = now() + 120;
-    let (mut stream, _) = loop {
+    let deadline = now() + 180;
+    // Navegadores às vezes abrem conexões antecipadas sem pedido; espera a do /callback.
+    let code = loop {
         match listener.accept() {
-            Ok(s) => break s,
+            Ok((mut stream, _)) => {
+                stream.set_nonblocking(false).ok();
+                stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+                let mut line = String::new();
+                let _ = BufReader::new(&stream).read_line(&mut line);
+                if !line.starts_with("GET /callback") {
+                    let _ = write!(stream, "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+                    continue;
+                }
+                let code = callback_code(&line, &state);
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n{}",
+                    result_page(code.is_ok())
+                );
+                break code?;
+            }
             Err(_) if now() < deadline => std::thread::sleep(Duration::from_millis(200)),
             Err(_) => return Err("tempo de login esgotado".into()),
         }
     };
-    stream.set_nonblocking(false).ok();
-    let mut line = String::new();
-    BufReader::new(&stream).read_line(&mut line).map_err(|e| e.to_string())?;
-    let code = callback_code(&line, &state);
-    let page = if code.is_ok() { "Pronto! Pode fechar esta aba e voltar ao Nocto." } else { "Login nao concluido." };
-    let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n{page}");
-    let code = code?;
     token_request(
         cfg,
         &[("grant_type", "authorization_code"), ("code", &code), ("redirect_uri", REDIRECT), ("client_id", &cfg.client_id), ("code_verifier", &verifier)],
@@ -182,26 +233,156 @@ pub fn play_query(cfg: &Config, query: &str) -> Result<String, String> {
     }
     let token = access_token(cfg)?;
     let auth = format!("Bearer {token}");
-    let url = format!("https://api.spotify.com/v1/search?type=track&limit=1&q={}", enc(query));
-    let mut resp = agent().get(&url).header("Authorization", &auth).call().map_err(|e| format!("sem conexão: {e}"))?;
-    let status = resp.status().as_u16();
-    let body = resp.body_mut().read_to_string().unwrap_or_default();
-    if status != 200 {
+    let (title, artist) = split_query(query);
+    let mut track = None;
+    if let Some(artist) = &artist {
+        let q = format!("track:\"{title}\" artist:\"{artist}\"");
+        track = best_track(&search(&auth, &q)?, query);
+    }
+    if track.is_none() {
+        track = best_track(&search(&auth, query)?, query);
+    }
+    let track = track.ok_or_else(|| format!("não achei \"{query}\" no Spotify"))?;
+
+    // Um único pedido de tocar, já com o aparelho definido: o ativo ou, se o Spotify
+    // estiver aberto e parado, o computador da lista de aparelhos.
+    let device = match active_device(&get(&auth, "https://api.spotify.com/v1/me/player")?) {
+        Some(id) => Some(id),
+        None => pick_device(&get(&auth, "https://api.spotify.com/v1/me/player/devices")?),
+    };
+    let (status, body) = start_playback(&auth, &track, device.as_deref())?;
+    if !(200..300).contains(&status) {
         return Err(play_error(status, &body));
     }
-    let track = first_track(&body).ok_or_else(|| format!("não achei \"{query}\" no Spotify"))?;
-    let payload = serde_json::json!({ "uris": [track.uri] }).to_string();
+    Ok(format!("Tocando: {}", track.label))
+}
+
+fn start_playback(auth: &str, track: &Track, device: Option<&str>) -> Result<(u16, String), String> {
+    let url = match device {
+        Some(id) => format!("https://api.spotify.com/v1/me/player/play?device_id={}", enc(id)),
+        None => "https://api.spotify.com/v1/me/player/play".into(),
+    };
+    let payload = play_payload(track).to_string();
     let mut resp = agent()
-        .put("https://api.spotify.com/v1/me/player/play")
-        .header("Authorization", &auth)
+        .put(&url)
+        .header("Authorization", auth)
         .header("Content-Type", "application/json")
         .send(payload)
         .map_err(|e| format!("sem conexão: {e}"))?;
-    let status = resp.status().as_u16();
-    if !(200..300).contains(&status) {
-        return Err(play_error(status, &resp.body_mut().read_to_string().unwrap_or_default()));
+    Ok((resp.status().as_u16(), resp.body_mut().read_to_string().unwrap_or_default()))
+}
+
+/// Corpo do pedido de tocar. O app desktop do Spotify ignora (com 204!) um pedido de
+/// faixa solta (`uris`) enquanto já toca outra faixa solta; tocar o álbum posicionado
+/// na faixa troca sempre (testado na API em 2026-11-15).
+pub fn play_payload(track: &Track) -> Value {
+    match &track.album {
+        Some(album) => serde_json::json!({ "context_uri": album, "offset": { "uri": track.uri }, "position_ms": 0 }),
+        None => serde_json::json!({ "uris": [track.uri], "position_ms": 0 }),
     }
-    Ok(format!("Tocando: {}", track.label))
+}
+
+fn get(auth: &str, url: &str) -> Result<String, String> {
+    let mut resp = agent().get(url).header("Authorization", auth).call().map_err(|e| format!("sem conexão: {e}"))?;
+    let status = resp.status().as_u16();
+    let body = resp.body_mut().read_to_string().unwrap_or_default();
+    match status {
+        200..=299 => Ok(body),
+        _ => Err(play_error(status, &body)),
+    }
+}
+
+fn search(auth: &str, q: &str) -> Result<String, String> {
+    get(auth, &format!("https://api.spotify.com/v1/search?type=track&limit=10&q={}", enc(q)))
+}
+
+/// Minúsculas, sem acento, só letras/números separados por um espaço.
+fn norm(s: &str) -> String {
+    let folded: String = s
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' | 'à' | 'â' | 'ã' | 'ä' => 'a',
+            'é' | 'ê' | 'ë' => 'e',
+            'í' | 'ï' => 'i',
+            'ó' | 'ô' | 'õ' | 'ö' => 'o',
+            'ú' | 'ü' => 'u',
+            'ç' => 'c',
+            c if c.is_alphanumeric() => c,
+            _ => ' ',
+        })
+        .collect();
+    folded.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// "ghost town do kanye west" → ("ghost town", Some("kanye west")). Só separa por
+/// " do ", " da ", " by " e " - " (" de " é comum demais em títulos).
+pub fn split_query(query: &str) -> (String, Option<String>) {
+    let q = norm(query);
+    for sep in [" do ", " da ", " by ", " - "] {
+        if let Some((t, a)) = q.split_once(sep) {
+            if !t.is_empty() && !a.is_empty() {
+                return (t.to_string(), Some(a.to_string()));
+            }
+        }
+    }
+    (q, None)
+}
+
+/// Escolhe, entre os resultados da busca, o que mais se parece com o pedido.
+pub fn best_track(json: &str, query: &str) -> Option<Track> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    let (title, artist) = split_query(query);
+    let compact = |s: &str| s.replace(' ', "");
+    let q_words: Vec<String> = norm(query).split(' ').map(str::to_string).collect();
+    let q_compact = compact(&norm(query));
+    let mut best: Option<(i32, Track)> = None;
+    for (rank, t) in v["tracks"]["items"].as_array()?.iter().enumerate() {
+        let (Some(name), Some(uri)) = (t["name"].as_str(), t["uri"].as_str()) else { continue };
+        let artists: Vec<&str> = t["artists"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str()).collect()).unwrap_or_default();
+        let n = norm(name);
+        let a = norm(&artists.join(" "));
+        let full = format!("{n} {a}");
+        let mut score = 0;
+        if compact(&n) == compact(&title) {
+            score += 100; // título exato, mesmo com palavras grudadas ("ghosttown")
+        } else if compact(&full) == q_compact || q_compact.starts_with(&compact(&n)) && !n.is_empty() {
+            score += 60;
+        }
+        let hits = q_words.iter().filter(|w| full.split(' ').any(|f| f == w.as_str())).count() as i32;
+        score += 30 * hits / q_words.len().max(1) as i32;
+        if let Some(artist) = &artist {
+            if a.contains(artist.as_str()) {
+                score += 40;
+            }
+        }
+        score -= rank as i32; // empate: mantém a ordem do Spotify (popularidade)
+        let label = format!("{name} — {}", artists.join(", "));
+        if best.as_ref().is_none_or(|(s, _)| score > *s) {
+            let album = t["album"]["uri"].as_str().map(str::to_string);
+            best = Some((score, Track { uri: uri.into(), label, album }));
+        }
+    }
+    best.map(|(_, t)| t)
+}
+
+/// Aparelho do player atual, se houver um tocando ou pausado.
+pub fn active_device(json: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    v["device"]["id"].as_str().map(str::to_string)
+}
+
+/// Aparelho para tocar: de preferência um computador; ignora os restritos.
+pub fn pick_device(json: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    let devices = v["devices"].as_array()?;
+    let usable = |d: &&Value| !d["is_restricted"].as_bool().unwrap_or(false) && d["id"].is_string();
+    devices
+        .iter()
+        .filter(usable)
+        .find(|d| d["type"] == "Computer")
+        .or_else(|| devices.iter().find(usable))
+        .and_then(|d| d["id"].as_str().map(str::to_string))
 }
 
 #[cfg(test)]
@@ -227,7 +408,7 @@ mod tests {
         let json = r#"{"tracks":{"items":[{"name":"Bohemian Rhapsody","uri":"spotify:track:abc","artists":[{"name":"Queen"}]}]}}"#;
         assert_eq!(
             first_track(json),
-            Some(Track { uri: "spotify:track:abc".into(), label: "Bohemian Rhapsody — Queen".into() })
+            Some(Track { uri: "spotify:track:abc".into(), label: "Bohemian Rhapsody — Queen".into(), album: None })
         );
         assert_eq!(first_track(r#"{"tracks":{"items":[]}}"#), None);
         assert_eq!(first_track("lixo"), None);
@@ -250,5 +431,88 @@ mod tests {
     fn missing_client_id_is_clear() {
         let cfg = Config { client_id: String::new(), token_path: "nao_existe.json".into() };
         assert!(play_query(&cfg, "x").unwrap_err().contains("Client ID"));
+    }
+}
+
+#[cfg(test)]
+mod device_tests {
+    use super::*;
+
+    #[test]
+    fn prefers_this_computer_and_skips_restricted() {
+        let json = r#"{"devices":[
+            {"id":"tv","type":"TV","is_restricted":false,"is_active":false},
+            {"id":"lock","type":"Computer","is_restricted":true,"is_active":false},
+            {"id":"pc","type":"Computer","is_restricted":false,"is_active":false}]}"#;
+        assert_eq!(pick_device(json), Some("pc".into()));
+    }
+    #[test]
+    fn falls_back_to_any_usable_device() {
+        assert_eq!(pick_device(r#"{"devices":[{"id":"cel","type":"Smartphone","is_restricted":false}]}"#), Some("cel".into()));
+        assert_eq!(pick_device(r#"{"devices":[]}"#), None);
+        assert_eq!(pick_device("lixo"), None);
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    fn results(items: &[(&str, &str)]) -> String {
+        let items: Vec<_> = items
+            .iter()
+            .enumerate()
+            .map(|(i, (n, a))| serde_json::json!({"name": n, "uri": format!("spotify:track:{i}"), "artists": [{"name": a}]}))
+            .collect();
+        serde_json::json!({"tracks": {"items": items}}).to_string()
+    }
+
+    #[test]
+    fn glued_words_match_the_real_title() {
+        let json = results(&[("ghostin", "Ariana Grande"), ("Ghost Town", "Kanye West")]);
+        assert_eq!(best_track(&json, "ghosttown").unwrap().label, "Ghost Town — Kanye West");
+    }
+    #[test]
+    fn title_beats_artist_only_match() {
+        let json = results(&[("Monster", "Kanye West"), ("Ghost Town", "Kanye West")]);
+        assert_eq!(best_track(&json, "ghost town kanye west").unwrap().label, "Ghost Town — Kanye West");
+    }
+    #[test]
+    fn artist_filter_breaks_ties() {
+        let json = results(&[("Ghost Town", "Madonna"), ("Ghost Town", "Kanye West")]);
+        assert_eq!(best_track(&json, "ghost town do kanye west").unwrap().label, "Ghost Town — Kanye West");
+        assert_eq!(best_track(&results(&[]), "x"), None);
+    }
+    #[test]
+    fn splits_title_and_artist() {
+        assert_eq!(split_query("ghost town do kanye west"), ("ghost town".into(), Some("kanye west".into())));
+        assert_eq!(split_query("Hello by Adele"), ("hello".into(), Some("adele".into())));
+        assert_eq!(split_query("festa de boa"), ("festa de boa".into(), None));
+    }
+    #[test]
+    fn active_device_comes_from_player_state() {
+        assert_eq!(active_device(r#"{"is_playing":true,"device":{"id":"pc1","is_active":true}}"#), Some("pc1".into()));
+        assert_eq!(active_device(""), None);
+    }
+}
+
+#[cfg(test)]
+mod payload_tests {
+    use super::*;
+
+    #[test]
+    fn plays_through_album_context_when_known() {
+        let t = Track { uri: "spotify:track:1".into(), label: "x".into(), album: Some("spotify:album:9".into()) };
+        assert_eq!(
+            play_payload(&t),
+            serde_json::json!({"context_uri": "spotify:album:9", "offset": {"uri": "spotify:track:1"}, "position_ms": 0})
+        );
+        let solo = Track { album: None, ..t };
+        assert_eq!(play_payload(&solo), serde_json::json!({"uris": ["spotify:track:1"], "position_ms": 0}));
+    }
+    #[test]
+    fn search_result_carries_album() {
+        let json = r#"{"tracks":{"items":[{"name":"Ghost Town","uri":"spotify:track:1","album":{"uri":"spotify:album:9"},"artists":[{"name":"Kanye West"}]}]}}"#;
+        assert_eq!(best_track(json, "ghost town").unwrap().album.as_deref(), Some("spotify:album:9"));
     }
 }

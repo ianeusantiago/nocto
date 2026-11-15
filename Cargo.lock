@@ -2578,6 +2578,7 @@ dependencies = [
  "slint",
  "slint-build",
  "windows",
+ "windows-numerics",
 ]
 
 [[package]]

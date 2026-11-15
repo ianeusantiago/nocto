@@ -135,29 +135,44 @@ export component Island inherits Window {
         item-input.focus();
     }
 
-    shell := Rectangle {
-        background: root.glass;
-        border-radius: root.mode == 0 ? self.height / 2 : 22px;
-        border-width: 1px;
-        border-color: root.ink.with-alpha(0.18);
-        animate background { duration: 3s; easing: ease-in-out; }
+    // Tamanho atual da ilha (o vidro é desenhado atrás pelo compositor do Windows, em glass.rs).
+    in property <length> island-w: 230px;
+    in property <length> island-h: 34px;
 
-        // ───────── Pílula ─────────
-        if root.mode == 0: Rectangle {
+    // A janela é fixa e transparente; só a área da ilha tem conteúdo. O morph usa a mesma
+    // curva e duração do vidro (glass.rs: MORPH_MS e a bézier com "quique").
+    shell := Rectangle {
+        x: (root.width - root.island-w) / 2;
+        y: 0;
+        width: root.island-w;
+        height: root.island-h;
+        clip: true;
+        animate x, width, height { duration: 420ms; easing: cubic-bezier(0.25, 1.28, 0.32, 1); }
+
+        // ───────── Pílula (compacta) ─────────
+        Rectangle {
+            visible: root.mode == 0;
+            opacity: root.mode == 0 ? 1 : 0;
+            animate opacity { delay: 140ms; duration: 220ms; }
             TouchArea {
                 clicked => { root.expand(); }
             }
             HorizontalLayout {
-                padding-left: 16px;
-                padding-right: 8px;
+                padding-left: 14px;
+                padding-right: 10px;
                 spacing: 10px;
                 alignment: stretch;
                 Rectangle {
-                    width: 8px;
-                    height: 8px;
+                    width: root.has-track ? 22px : 8px;
+                    height: root.has-track ? 22px : 8px;
                     y: (parent.height - self.height) / 2;
-                    border-radius: 4px;
-                    background: root.playing ? root.accent : root.ink.with-alpha(0.45);
+                    border-radius: root.has-track ? 6px : 4px;
+                    background: root.has-track ? root.accent.with-alpha(0.9) : root.ink.with-alpha(0.5);
+                    if root.has-track: Glyph {
+                        text: "\u{EC4F}";
+                        color: #ffffff;
+                        font-size: 11px;
+                    }
                 }
                 Text {
                     text: root.has-track ? root.track : root.notice;
@@ -167,6 +182,18 @@ export component Island inherits Window {
                     overflow: elide;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
+                }
+                // Ondinha do som, como na Dynamic Island (só anima enquanto toca).
+                if root.playing: Rectangle {
+                    width: 4 * 3px + 3 * 2px;
+                    for i in 4: Rectangle {
+                        x: i * 5px;
+                        width: 3px;
+                        height: 4px + 12px * abs(sin((animation-tick() / 1ms) * 0.45deg + i * 70deg));
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 1.5px;
+                        background: root.accent;
+                    }
                 }
                 if root.has-track: IconButton {
                     y: (parent.height - self.height) / 2;
@@ -187,6 +214,8 @@ export component Island inherits Window {
         bar := FocusScope {
             visible: root.mode == 1;
             enabled: root.mode == 1;
+            opacity: root.mode == 1 ? 1 : 0;
+            animate opacity { delay: 140ms; duration: 220ms; }
             key-pressed(event) => {
                 if (event.text == Key.Escape) {
                     root.cancel();
@@ -246,6 +275,8 @@ export component Island inherits Window {
         cal := FocusScope {
             visible: root.mode == 2;
             enabled: root.mode == 2;
+            opacity: root.mode == 2 ? 1 : 0;
+            animate opacity { delay: 160ms; duration: 240ms; }
             key-pressed(event) => {
                 if (event.text == Key.Escape) {
                     root.collapse();
