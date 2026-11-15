@@ -4,9 +4,9 @@ Tudo gratuito, sem serviço pago. Ordem definida pelo autor: **A, D, E, B, C**, 
 
 | # | Item | Como (resumo) | Observações |
 |---|---|---|---|
-| A | ~~**Release nova no GitHub** | Gerar e publicar a 0.2.0 com o vidro, as páginas e as correções. | Rápido. |
-| D | ~~**Tocar uma playlist** | `toca playlist only day` → procura nas suas playlists e toca. | Precisa de uma permissão a mais do Spotify (`playlist-read-private`): um novo "conectar spotify" uma vez. |
-| E | ~~**Volume com knob** | Página de música ganha um knob giratório (estilo FL Studio, no visual do Nocto) ou barra, trocável depois. | Volume do próprio Spotify no mixer do Windows: grátis, local e funciona com qualquer player. |
+| A | ✅ **Release nova no GitHub** | Gerar e publicar a 0.2.0 com o vidro, as páginas e as correções. | Rápido. |
+| D | ✅ **Tocar uma playlist** | `toca playlist only day` → procura nas suas playlists e toca. | Precisa de uma permissão a mais do Spotify (`playlist-read-private`): um novo "conectar spotify" uma vez. |
+| E | ✅ **Volume com knob** | Página de música ganha um knob giratório (estilo FL Studio, no visual do Nocto) ou barra, trocável depois. | Volume do próprio Spotify no mixer do Windows: grátis, local e funciona com qualquer player. |
 | B | **Configurações** (aba na ilha) | Página nova: tema, o que a pílula mostra, atalho, esconder em tela cheia. | Base para C. |
 | C | **Adicionar apps por arraste** | Em Configurações → Comandos → "Adicionar app": a ilha pede para arrastar um app (.exe ou atalho .lnk); o Nocto lê o nome e o ícone, mostra uma animação de "adicionado" e daí `abre brave` funciona. Lista com remover. | Grava na `allowlist.json` (que hoje só se edita à mão). |
 | F | **Notificações do WhatsApp** | Página/aviso na ilha quando chega mensagem. | Lê as notificações do app WhatsApp do Windows (API de notificações do Windows); grátis. Pede permissão de acesso às notificações uma vez. |
