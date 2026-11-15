@@ -265,3 +265,120 @@ pub fn watch_foreground(f: impl Fn(isize) + 'static) {
         );
     }
 }
+
+/// Caminho de arquivo de onde tirar o ícone de um item da lista do "abre":
+/// o próprio arquivo, um .exe achado no PATH ("notepad.exe") ou, para "spotify:",
+/// o Spotify instalado. `None` quando não há arquivo (ex.: "ms-settings:").
+pub fn icon_source(target: &str) -> Option<std::path::PathBuf> {
+    use std::path::{Path, PathBuf};
+    let lower = target.to_lowercase();
+    if lower.ends_with(".lnk") {
+        // Ícone do programa para onde o atalho aponta (sem a setinha de atalho).
+        if let Some(exe) = shortcut_target(Path::new(target)) {
+            return Some(exe);
+        }
+    }
+    if Path::new(target).is_file() {
+        return Some(PathBuf::from(target));
+    }
+    if lower.starts_with("spotify:") {
+        let exe = PathBuf::from(std::env::var_os("APPDATA")?).join("Spotify").join("Spotify.exe");
+        return exe.is_file().then_some(exe);
+    }
+    if lower.ends_with(".exe") {
+        let name: Vec<u16> = target.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut buf = [0u16; 520];
+        let len = unsafe {
+            windows::Win32::Storage::FileSystem::SearchPathW(
+                windows::core::PCWSTR::null(),
+                windows::core::PCWSTR(name.as_ptr()),
+                windows::core::PCWSTR::null(),
+                Some(&mut buf),
+                None,
+            )
+        } as usize;
+        if len > 0 && len < buf.len() {
+            return Some(PathBuf::from(String::from_utf16_lossy(&buf[..len])));
+        }
+    }
+    None
+}
+
+/// Ícone grande (32×32) de um arquivo, em RGBA, pelo próprio Windows.
+pub fn file_icon_rgba(path: &std::path::Path) -> Option<(u32, u32, Vec<u8>)> {
+    use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
+    use windows::Win32::UI::Shell::{SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGetFileInfoW};
+    unsafe {
+        let wide: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+        let mut info = SHFILEINFOW::default();
+        let ok = SHGetFileInfoW(
+            windows::core::PCWSTR(wide.as_ptr()),
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_LARGEICON,
+        );
+        if ok == 0 || info.hIcon.is_invalid() {
+            return None;
+        }
+        let icon = info.hIcon;
+        let mut ii = ICONINFO::default();
+        let result = (|| {
+            GetIconInfo(icon, &mut ii).ok()?;
+            let dc = CreateCompatibleDC(None);
+            let mut bmi = BITMAPINFO::default();
+            bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+            // Primeiro pergunta o tamanho do bitmap do ícone.
+            GetDIBits(dc, ii.hbmColor, 0, 0, None, &mut bmi, DIB_RGB_COLORS);
+            let (w, h) = (bmi.bmiHeader.biWidth.unsigned_abs(), bmi.bmiHeader.biHeight.unsigned_abs());
+            if w == 0 || h == 0 || w > 256 || h > 256 {
+                let _ = DeleteDC(dc);
+                return None;
+            }
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = BI_RGB.0;
+            bmi.bmiHeader.biHeight = -(h as i32); // de cima para baixo
+            let mut px = vec![0u8; (w * h * 4) as usize];
+            let lines = GetDIBits(dc, ii.hbmColor, 0, h, Some(px.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
+            let _ = DeleteDC(dc);
+            if lines == 0 {
+                return None;
+            }
+            // BGRA → RGBA; ícones antigos vêm sem alfa: ficam opacos.
+            let has_alpha = px.chunks(4).any(|p| p[3] != 0);
+            for p in px.chunks_mut(4) {
+                p.swap(0, 2);
+                if !has_alpha {
+                    p[3] = 255;
+                }
+            }
+            Some((w, h, px))
+        })();
+        if !ii.hbmColor.is_invalid() {
+            let _ = DeleteObject(ii.hbmColor.into());
+        }
+        if !ii.hbmMask.is_invalid() {
+            let _ = DeleteObject(ii.hbmMask.into());
+        }
+        let _ = DestroyIcon(icon);
+        result
+    }
+}
+
+/// Para onde um atalho .lnk aponta (se for um arquivo que existe).
+fn shortcut_target(lnk: &std::path::Path) -> Option<std::path::PathBuf> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile, STGM_READ};
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use windows::core::Interface;
+    unsafe {
+        let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).ok()?;
+        let file: IPersistFile = link.cast().ok()?;
+        let wide: Vec<u16> = lnk.as_os_str().to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+        file.Load(windows::core::PCWSTR(wide.as_ptr()), STGM_READ).ok()?;
+        let mut buf = [0u16; 520];
+        link.GetPath(&mut buf, std::ptr::null_mut(), 0).ok()?;
+        let len = buf.iter().position(|&c| c == 0).unwrap_or(0);
+        let path = std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len]));
+        path.is_file().then_some(path)
+    }
+}

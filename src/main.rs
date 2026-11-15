@@ -55,6 +55,8 @@ struct App {
     /// Aviso que substitui a data na pílula (ex.: atalho ocupado).
     pill_note: String,
     volume: volume::Volume,
+    /// Ícones dos apps já lidos (destino → ícone), para não reler a cada abertura.
+    icons: RefCell<std::collections::HashMap<String, Option<slint::Image>>>,
 }
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
@@ -205,14 +207,31 @@ impl App {
             .allow
             .sorted_names()
             .into_iter()
-            .map(|name| AppItem {
-                letter: name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
-                name: name.into(),
+            .map(|name| {
+                let icon = self.allow.get(&name).and_then(|target| self.app_icon(target));
+                AppItem {
+                    letter: name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
+                    name: name.into(),
+                    has_icon: icon.is_some(),
+                    icon: icon.unwrap_or_default(),
+                }
             })
             .collect();
         self.ui.set_apps(ModelRc::new(VecModel::from(apps)));
         self.ui.set_hide_fullscreen(self.config.hide_in_fullscreen);
         self.ui.set_hotkey_label(self.config.hotkey.replace('+', " + ").into());
+    }
+
+    /// Ícone do app (do .exe ou atalho), lido uma vez e guardado.
+    fn app_icon(&self, target: &str) -> Option<slint::Image> {
+        if let Some(cached) = self.icons.borrow().get(target) {
+            return cached.clone();
+        }
+        let icon = win::icon_source(target).and_then(|p| win::file_icon_rgba(&p)).map(|(w, h, px)| {
+            slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&px, w, h))
+        });
+        self.icons.borrow_mut().insert(target.to_string(), icon.clone());
+        icon
     }
 
     fn save_allowlist(&self) {
@@ -805,6 +824,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         progress_timer: slint::Timer::default(),
         pill_note: String::new(),
         volume: volume::Volume::new(),
+        icons: RefCell::new(std::collections::HashMap::new()),
         config,
         dir,
     };

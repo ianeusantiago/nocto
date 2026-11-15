@@ -146,6 +146,8 @@ component Switch inherits Rectangle {
 export struct AppItem {
     name: string,
     letter: string,
+    icon: image,
+    has-icon: bool,
 }
 
 component Glyph inherits Text {
@@ -929,7 +931,14 @@ export component Island inherits Window {
                                         HorizontalLayout {
                                             padding-left: 4px;
                                             spacing: 8px;
-                                            Rectangle {
+                                            if app.has-icon: Image {
+                                                width: 22px;
+                                                height: 22px;
+                                                y: (parent.height - self.height) / 2;
+                                                source: app.icon;
+                                                image-fit: contain;
+                                            }
+                                            if !app.has-icon: Rectangle {
                                                 width: 22px;
                                                 height: 22px;
                                                 y: (parent.height - self.height) / 2;
