@@ -32,6 +32,35 @@ impl Allowlist {
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.apps.keys().map(String::as_str)
     }
+
+    pub fn sorted_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.apps.keys().cloned().collect();
+        names.sort();
+        names
+    }
+
+    pub fn add(&mut self, name: &str, target: &str) {
+        self.apps.insert(name.to_lowercase(), target.to_string());
+    }
+
+    pub fn remove(&mut self, name: &str) {
+        self.apps.remove(&name.to_lowercase());
+    }
+
+    pub fn to_json(&self) -> String {
+        let sorted: std::collections::BTreeMap<_, _> = self.apps.iter().collect();
+        serde_json::to_string_pretty(&sorted).unwrap_or_else(|_| "{}".into())
+    }
+}
+
+/// Nome do app a partir de um executável ou atalho arrastado ("Brave.lnk" → "brave").
+/// `None` se o arquivo não for um app.
+pub fn app_name(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?.to_lowercase();
+    if ext != "exe" && ext != "lnk" {
+        return None;
+    }
+    Some(path.file_stem()?.to_str()?.trim().to_lowercase())
 }
 
 /// Abre pelo shell do Windows sem passar por `cmd` (sem interpretação de comando).
@@ -66,7 +95,11 @@ pub fn run(cmd: &Command, allow: &Allowlist) -> Result<(), String> {
             let target = allow
                 .get(name)
                 .ok_or_else(|| format!("\"{name}\" não está na lista de apps permitidos"))?;
-            if Path::new(target).is_file() || target.to_lowercase().ends_with(".exe") {
+            let lower = target.to_lowercase();
+            if lower.ends_with(".lnk") {
+                // Atalho: quem sabe abrir é o shell do Windows.
+                shell_open(target)
+            } else if Path::new(target).is_file() || lower.ends_with(".exe") {
                 Process::new(target)
                     .spawn()
                     .map(|_| ())
@@ -114,5 +147,29 @@ mod tests {
         let a = Allowlist::from_json(r#"{"spotify":"spotify:"}"#).unwrap();
         assert_eq!(a.get("spotify"), Some("spotify:"));
         assert!(Allowlist::from_json("{lixo").is_err());
+    }
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    #[test]
+    fn add_remove_and_save() {
+        let mut a = Allowlist::from_json(r#"{"spotify":"spotify:"}"#).unwrap();
+        a.add("Brave", r"C:\Users\x\Desktop\Brave.lnk");
+        assert_eq!(a.get("brave"), Some(r"C:\Users\x\Desktop\Brave.lnk"));
+        assert_eq!(a.sorted_names(), vec!["brave".to_string(), "spotify".to_string()]);
+        let again = Allowlist::from_json(&a.to_json()).unwrap();
+        assert_eq!(again.get("brave"), a.get("brave"));
+        a.remove("BRAVE");
+        assert_eq!(a.get("brave"), None);
+    }
+    #[test]
+    fn app_name_comes_from_the_file() {
+        assert_eq!(app_name(Path::new(r"C:\Users\x\Desktop\Brave.lnk")), Some("brave".into()));
+        assert_eq!(app_name(Path::new(r"C:\Program Files\Obs\obs64.exe")), Some("obs64".into()));
+        assert_eq!(app_name(Path::new(r"C:\x\Visual Studio Code.lnk")), Some("visual studio code".into()));
+        assert_eq!(app_name(Path::new(r"C:\x\foto.png")), None);
     }
 }

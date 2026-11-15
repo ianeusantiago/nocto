@@ -7,7 +7,7 @@ mod win;
 
 use nocto_core::calendar::{self, Calendar};
 use nocto_core::commands::{self, Command};
-use nocto_core::config::{self, Config};
+use nocto_core::config::{self, CompactMode, Config};
 use nocto_core::imgconv::{self, Format};
 use nocto_core::launcher::{self, Allowlist};
 use nocto_core::{format, keys, spotify, theme};
@@ -138,6 +138,7 @@ impl App {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
             CALENDAR if self.page == 0 => (680.0, 214.0, 40.0),
+            CALENDAR if self.page == 2 => (680.0, 300.0, 40.0),
             CALENDAR => (680.0, 340.0, 40.0),
             DROP => (440.0, 128.0, 36.0),
             _ if ui.get_show_music() => (360.0, 38.0, 19.0),
@@ -189,14 +190,66 @@ impl App {
         if page == 1 {
             self.refresh_calendar();
         }
+        if page == 2 {
+            self.refresh_settings();
+        }
         self.layout();
         self.update_progress_timer();
+    }
+
+    /// Atalhos que dá para escolher na página de configurações.
+    const HOTKEYS: [&'static str; 4] = ["alt+shift+space", "ctrl+alt+n", "win+alt+space", "ctrl+shift+space"];
+
+    fn refresh_settings(&self) {
+        let apps: Vec<AppItem> = self
+            .allow
+            .sorted_names()
+            .into_iter()
+            .map(|name| AppItem {
+                letter: name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
+                name: name.into(),
+            })
+            .collect();
+        self.ui.set_apps(ModelRc::new(VecModel::from(apps)));
+        self.ui.set_hide_fullscreen(self.config.hide_in_fullscreen);
+        self.ui.set_hotkey_label(self.config.hotkey.replace('+', " + ").into());
+    }
+
+    fn save_allowlist(&self) {
+        let _ = std::fs::write(self.dir.join("allowlist.json"), self.allow.to_json());
+    }
+
+    /// Mostra a página de configurações (abre o painel se estiver fechado).
+    fn show_settings(&mut self) {
+        self.page = 2;
+        self.ui.set_page(2);
+        self.refresh_settings();
+        if self.ui.get_mode() == CALENDAR {
+            self.layout();
+        } else {
+            self.apply_theme();
+            self.set_mode(CALENDAR);
+        }
+    }
+
+    /// App arrastado até a ilha: entra na lista do "abre".
+    fn add_app(&mut self, name: String, path: PathBuf) {
+        self.allow.add(&name, &path.to_string_lossy());
+        self.save_allowlist();
+        self.ui.set_drop_target(false);
+        let mut shown = name.clone();
+        if let Some(first) = shown.get_mut(..1) {
+            first.make_ascii_uppercase();
+        }
+        self.ui.set_settings_note(format!("✓ {shown} adicionado. Digite: abre {name}").into());
+        self.show_settings();
     }
 
     /// Abre o painel: na música se houver uma; senão, no calendário.
     fn open_panel(&mut self, page: i32) {
         self.page = page;
         self.ui.set_page(page);
+        self.ui.set_settings_note("".into());
         self.apply_theme();
         self.set_mode(CALENDAR);
         win::activate(self.hwnd);
@@ -250,6 +303,14 @@ impl App {
     fn update_compact(&self) {
         let show = self.config.compact.shows_music(self.ui.get_has_track(), self.ui.get_playing());
         self.ui.set_compact_label(self.config.compact.label().into());
+        self.ui.set_compact_short(
+            match self.config.compact {
+                CompactMode::Auto => "Automático",
+                CompactMode::Music => "Música",
+                CompactMode::Clock => "Relógio",
+            }
+            .into(),
+        );
         if show != self.ui.get_show_music() {
             self.ui.set_show_music(show);
             if self.ui.get_mode() == PILL {
@@ -330,7 +391,7 @@ impl App {
                     Ok(()) => self.close(false),
                     Err(e) => {
                         let hint = if matches!(cmd, Command::OpenApp(_)) {
-                            " (edite allowlist.json para adicionar apps)"
+                            " (arraste o app até a ilha para adicionar)"
                         } else {
                             ""
                         };
@@ -526,6 +587,32 @@ fn wire_callbacks(ui: &Island) {
     });
     ui.on_prev_track(media::previous);
     ui.on_go_page(|page| with_app(move |app| app.go_page(page)));
+    ui.on_remove_app(|name| {
+        let name = name.to_string();
+        with_app(move |app| {
+            app.allow.remove(&name);
+            app.save_allowlist();
+            app.ui.set_settings_note(format!("{name} removido").into());
+            app.refresh_settings();
+        })
+    });
+    ui.on_toggle_fullscreen(|| {
+        with_app(|app| {
+            app.config.hide_in_fullscreen = !app.config.hide_in_fullscreen;
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.refresh_settings();
+            app.foreground_changed(win::foreground());
+        })
+    });
+    ui.on_cycle_hotkey(|| {
+        with_app(|app| {
+            let i = App::HOTKEYS.iter().position(|h| *h == app.config.hotkey).map_or(0, |i| i + 1);
+            app.config.hotkey = App::HOTKEYS[i % App::HOTKEYS.len()].to_string();
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.ui.set_settings_note("O atalho novo vale ao reabrir o Nocto.".into());
+            app.refresh_settings();
+        })
+    });
     ui.on_volume_changed(|v| {
         // Desenvolvimento: NOCTO_DEBUG registra cada mudança de volume.
         if std::env::var_os("NOCTO_DEBUG").is_some() {
@@ -599,6 +686,17 @@ fn wire_callbacks(ui: &Island) {
     // Arrastar e soltar arquivos e perda de foco vêm direto dos eventos da janela.
     ui.window().on_winit_window_event(|_, event| {
         match event {
+            // Arrastar um app (.exe ou atalho) abre as configurações para adicioná-lo.
+            WindowEvent::HoveredFile(path) if launcher::app_name(path).is_some() => with_app(|app| {
+                app.ui.set_drop_target(true);
+                app.ui.set_settings_note("".into());
+                app.show_settings();
+            }),
+            WindowEvent::DroppedFile(path) if launcher::app_name(path).is_some() => {
+                let path = path.clone();
+                let name = launcher::app_name(&path).unwrap_or_default();
+                with_app(move |app| app.add_app(name, path))
+            }
             WindowEvent::HoveredFile(_) => with_app(|app| {
                 if app.ui.get_mode() != DROP {
                     app.dropped = None;
@@ -619,6 +717,10 @@ fn wire_callbacks(ui: &Island) {
                 })
             }
             WindowEvent::HoveredFileCancelled => with_app(|app| {
+                if app.ui.get_drop_target() {
+                    app.ui.set_drop_target(false);
+                    return;
+                }
                 if app.dropped.is_none() {
                     app.close(false);
                 }

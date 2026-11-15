@@ -12,6 +12,9 @@ Uma "Dynamic Island" para Windows, escrita em Rust. Uma ilha no estilo Dynamic I
 | **Comandos** | `abre spotify` · `abre github.com` · `abre C:\Projetos` · `toca <música>` · `pausa` · `próxima` · `agenda` · `conectar spotify` · `sair` |
 | **Música** | Clique na ilha: capa do álbum, nome, artista, tempo e controles (⏮ ⏯ ⏭). Logo do Spotify quando a música vem dele. Funciona com qualquer player do Windows, sem login. |
 | **Páginas** | A ilha expandida tem páginas (música e calendário). Troque arrastando, com a roda do mouse, com as setas ← → ou clicando nas bolinhas do topo. |
+| **Configurações** | Terceira página da ilha: tema, o que a pílula mostra, esconder em jogos e atalho. **Arraste um app ou atalho** (ex.: o Brave da área de trabalho) até a ilha e `abre brave` passa a funcionar; dá para remover na mesma lista. |
+| **Volume** | Knob na página de música (arraste ou gire a roda do mouse) que controla o volume do Spotify no mixer do Windows. |
+| **Playlist** | `toca playlist only day` toca uma playlist sua pelo nome (digite `conectar spotify` uma vez antes). |
 | **Pílula** | Mostra a música ou o relógio. O botão "Pílula" na página de música alterna entre automático (música só tocando), música e relógio. |
 | **Calendário** | Segunda página da ilha. Escolha o dia e digite `14:00 reunião` + Enter. Clique no item para concluir. Tudo fica num arquivo local. |
 | **Converter imagem** | Arraste uma imagem até a pílula e escolha PNG, JPEG ou WebP. O arquivo novo é salvo ao lado do original, sem sobrescrever. |

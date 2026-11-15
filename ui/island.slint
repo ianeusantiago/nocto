@@ -118,6 +118,36 @@ component Knob inherits Rectangle {
     }
 }
 
+// Interruptor liga/desliga.
+component Switch inherits Rectangle {
+    in property <bool> on;
+    in property <color> ink;
+    in property <color> accent;
+    callback toggled();
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: root.on ? root.accent : root.ink.with-alpha(0.25);
+    animate background { duration: 180ms; }
+    Rectangle {
+        x: root.on ? parent.width - self.width - 3px : 3px;
+        y: 3px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: #ffffff;
+        animate x { duration: 180ms; easing: ease-out; }
+    }
+    TouchArea {
+        clicked => { root.toggled(); }
+    }
+}
+
+export struct AppItem {
+    name: string,
+    letter: string,
+}
+
 component Glyph inherits Text {
     font-family: "Segoe MDL2 Assets";
     vertical-alignment: center;
@@ -218,6 +248,13 @@ export component Island inherits Window {
     in property <string> compact-label;
     // Volume do Spotify (0–1) e se há sessão de áudio dele para controlar.
     in-out property <float> volume: 0.5;
+    // Configurações.
+    in property <[AppItem]> apps;
+    in property <bool> hide-fullscreen: true;
+    in property <string> hotkey-label;
+    in property <string> compact-short;
+    in property <string> settings-note;
+    in property <bool> drop-target;
     in property <bool> has-volume;
 
     callback submit(string);
@@ -230,6 +267,9 @@ export component Island inherits Window {
     callback go-page(int);
     callback cycle-compact();
     callback volume-changed(float);
+    callback remove-app(string);
+    callback toggle-fullscreen();
+    callback cycle-hotkey();
     callback prev-month();
     callback next-month();
     callback pick-day(string);
@@ -430,7 +470,7 @@ export component Island inherits Window {
                     return accept;
                 }
                 if (event.text == Key.RightArrow) {
-                    root.go-page(min(1, root.page + 1));
+                    root.go-page(min(2, root.page + 1));
                     return accept;
                 }
                 reject
@@ -444,7 +484,7 @@ export component Island inherits Window {
                     }
                     if (e.kind == PointerEventKind.up) {
                         if (self.mouse-x - self.start-x < -60px) {
-                            root.go-page(min(1, root.page + 1));
+                            root.go-page(min(2, root.page + 1));
                         } else if (self.mouse-x - self.start-x > 60px) {
                             root.go-page(max(0, root.page - 1));
                         }
@@ -452,7 +492,7 @@ export component Island inherits Window {
                 }
                 scroll-event(e) => {
                     if (e.delta-y < 0 || e.delta-x < 0) {
-                        root.go-page(min(1, root.page + 1));
+                        root.go-page(min(2, root.page + 1));
                     } else if (e.delta-y > 0 || e.delta-x > 0) {
                         root.go-page(max(0, root.page - 1));
                     }
@@ -461,14 +501,14 @@ export component Island inherits Window {
                 Rectangle {
                     x: -root.page * parent.width;
                     y: 0;
-                    width: parent.width * 2;
+                    width: parent.width * 3;
                     height: parent.height;
                     animate x { duration: 380ms; easing: cubic-bezier(0.25, 1.1, 0.32, 1); }
                     // Página 1: música (capa, nome, artista, tempo e controles).
                     Rectangle {
                         x: 0;
                         y: 0;
-                        width: parent.width / 2;
+                        width: parent.width / 3;
                         height: 214px;
                         HorizontalLayout {
                             padding: 22px;
@@ -613,9 +653,9 @@ export component Island inherits Window {
                     }
                     // Página 2: calendário.
                     Rectangle {
-                        x: parent.width / 2;
+                        x: parent.width / 3;
                         y: 0;
-                        width: parent.width / 2;
+                        width: parent.width / 3;
                         height: 340px;
                     HorizontalLayout {
                         padding: 18px;
@@ -807,6 +847,124 @@ export component Island inherits Window {
                         }
                     }
                     }
+                    // Página 3: configurações e apps do "abre".
+                    Rectangle {
+                        x: parent.width * 2 / 3;
+                        y: 0;
+                        width: parent.width / 3;
+                        height: 300px;
+                        HorizontalLayout {
+                            padding: 20px;
+                            padding-top: 32px;
+                            spacing: 22px;
+                            VerticalLayout {
+                                width: 290px;
+                                spacing: 10px;
+                                Text {
+                                    text: "Configurações";
+                                    color: root.ink;
+                                    font-size: 17px;
+                                    font-weight: 600;
+                                }
+                                HorizontalLayout {
+                                    height: 30px;
+                                    Text { text: "Tema"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Chip { text: root.theme-label; ink: root.ink; accent: root.accent; clicked => { root.cycle-theme(); } }
+                                }
+                                HorizontalLayout {
+                                    height: 30px;
+                                    Text { text: "Pílula mostra"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Chip { text: root.compact-short; ink: root.ink; accent: root.accent; clicked => { root.cycle-compact(); } }
+                                }
+                                HorizontalLayout {
+                                    height: 30px;
+                                    Text { text: "Esconder em jogos (tela cheia)"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Switch { y: 4px; on: root.hide-fullscreen; ink: root.ink; accent: root.accent; toggled => { root.toggle-fullscreen(); } }
+                                }
+                                HorizontalLayout {
+                                    height: 30px;
+                                    Text { text: "Atalho"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Chip { text: root.hotkey-label; ink: root.ink; accent: root.accent; clicked => { root.cycle-hotkey(); } }
+                                }
+                                Text {
+                                    text: root.settings-note;
+                                    color: root.accent;
+                                    font-size: 12px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Apps do “abre”";
+                                    color: root.ink;
+                                    font-size: 15px;
+                                    font-weight: 600;
+                                }
+                                Rectangle {
+                                    height: 50px;
+                                    border-radius: 12px;
+                                    border-width: 1px;
+                                    border-color: root.drop-target ? root.accent : root.ink.with-alpha(0.3);
+                                    background: root.drop-target ? root.accent.with-alpha(0.25) : root.ink.with-alpha(0.06);
+                                    animate background, border-color { duration: 200ms; }
+                                    Text {
+                                        text: root.drop-target ? "Solte para adicionar" : "Arraste um app ou atalho até a ilha";
+                                        color: root.ink.with-alpha(0.8);
+                                        font-size: 12px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Flickable {
+                                    vertical-stretch: 1;
+                                    content-height: max(self.height, root.apps.length * 32px);
+                                    for app[i] in root.apps: Rectangle {
+                                        y: i * 32px;
+                                        width: parent.width;
+                                        height: 30px;
+                                        border-radius: 8px;
+                                        background: app-row.has-hover ? root.ink.with-alpha(0.08) : transparent;
+                                        app-row := TouchArea { }
+                                        HorizontalLayout {
+                                            padding-left: 4px;
+                                            spacing: 8px;
+                                            Rectangle {
+                                                width: 22px;
+                                                height: 22px;
+                                                y: (parent.height - self.height) / 2;
+                                                border-radius: 6px;
+                                                background: root.accent.with-alpha(0.8);
+                                                Text {
+                                                    text: app.letter;
+                                                    color: #ffffff;
+                                                    font-size: 12px;
+                                                    font-weight: 700;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            Text {
+                                                text: app.name;
+                                                color: root.ink;
+                                                font-size: 13px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                                horizontal-stretch: 1;
+                                            }
+                                            IconButton {
+                                                y: (parent.height - self.height) / 2;
+                                                icon: Icons.close;
+                                                ink: root.ink.with-alpha(0.6);
+                                                size: 9px;
+                                                clicked => { root.remove-app(app.name); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             // Bolinhas: uma por página.
@@ -815,7 +973,7 @@ export component Island inherits Window {
                 height: 8px;
                 alignment: center;
                 spacing: 8px;
-                for i in 2: Rectangle {
+                for i in 3: Rectangle {
                     width: root.page == i ? 18px : 7px;
                     height: 7px;
                     border-radius: 3.5px;
