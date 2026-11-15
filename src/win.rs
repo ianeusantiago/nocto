@@ -120,6 +120,14 @@ pub fn set_region(raw: isize, x: f32, width: f32, height: f32, radius: f32) {
     }
 }
 
+/// Área visível vazia: a janela continua existindo (com o desenho guardado), mas
+/// não aparece nem pega cliques.
+pub fn clear_region(raw: isize) {
+    unsafe {
+        SetWindowRgn(h(raw), Some(CreateRectRgn(0, 0, 0, 0)), true);
+    }
+}
+
 pub fn show(raw: isize, visible: bool) {
     unsafe {
         let _ = ShowWindow(h(raw), if visible { SW_SHOWNOACTIVATE } else { SW_HIDE });
@@ -147,6 +155,11 @@ pub fn is_fullscreen(raw: isize) -> bool {
         let n = GetClassNameW(fg, &mut class) as usize;
         let class = String::from_utf16_lossy(&class[..n]);
         if class == "WorkerW" || class == "Progman" {
+            return false;
+        }
+        // Janela maximizada não é tela cheia (com a barra de tarefas oculta, ela também
+        // cobre o monitor inteiro e escondia a ilha sem motivo).
+        if IsZoomed(fg).as_bool() {
             return false;
         }
         let mut r = RECT::default();

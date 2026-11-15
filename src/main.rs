@@ -44,6 +44,8 @@ struct App {
     fullscreen_app: bool,
     glass: Option<glass::Glass>,
     last_shape: std::cell::Cell<(f32, f32)>,
+    region_spec: std::cell::Cell<(f32, f32, f32, f32)>,
+    hidden: std::cell::Cell<bool>,
 }
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
@@ -87,16 +89,29 @@ impl App {
         std::iter::once(self.hwnd).chain(self.glass.as_ref().map(|g| g.hwnd)).collect()
     }
 
+    /// Área visível e clicável das duas janelas (pixels físicos).
     fn region(&self, x: f32, w: f32, h: f32, r: f32) {
-        for hwnd in self.hwnds() {
-            win::set_region(hwnd, x, w, h, r);
+        self.region_spec.set((x, w, h, r));
+        self.apply_region();
+    }
+
+    /// Some/aparece sem esconder as janelas: esconder (ShowWindow) fazia o Windows
+    /// descartar o desenho da interface, que voltava vazia (só o vidro) ou com manchas.
+    /// Aqui a área visível vira vazia e o desenho continua intacto.
+    fn visible(&self, visible: bool) {
+        if self.hidden.replace(!visible) != !visible {
+            self.apply_region();
         }
     }
 
-    fn visible(&self, visible: bool) {
-        // O vidro primeiro, para a interface aparecer já por cima dele.
-        for hwnd in self.hwnds().into_iter().rev() {
-            win::show(hwnd, visible);
+    fn apply_region(&self) {
+        let (x, w, h, r) = self.region_spec.get();
+        for hwnd in self.hwnds() {
+            if self.hidden.get() {
+                win::clear_region(hwnd);
+            } else {
+                win::set_region(hwnd, x, w, h, r);
+            }
         }
     }
 
@@ -513,6 +528,8 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
     let glass = if std::env::var_os("NOCTO_NOGLASS").is_some() { None } else { glass::Glass::new(hwnd).ok() };
     if let Some(g) = &glass {
         win::place_fixed(g.hwnd, WINDOW_W, WINDOW_H, ui.window().scale_factor());
+        // As duas janelas ficam sempre "mostradas"; para sumir, só a área visível muda.
+        win::show(g.hwnd, true);
     }
 
     let (y, m, ..) = win::local_time();
@@ -529,6 +546,8 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         fullscreen_app: false,
         glass,
         last_shape: std::cell::Cell::new((0.0, 0.0)),
+        region_spec: std::cell::Cell::new((0.0, 0.0, 0.0, 0.0)),
+        hidden: std::cell::Cell::new(false),
         config,
         dir,
     };
@@ -548,6 +567,24 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         app.set_mode(PILL);
         // Já começa escondida se um jogo em tela cheia estiver na frente.
         app.foreground_changed(win::foreground());
+        // Desenvolvimento: NOCTO_CYCLE alterna sozinho entre os formatos (para reproduzir bugs).
+        if std::env::var_os("NOCTO_CYCLE").is_some() {
+            let timer = Box::leak(Box::new(slint::Timer::default()));
+            let step = std::cell::Cell::new(0);
+            timer.start(slint::TimerMode::Repeated, Duration::from_millis(1500), move || {
+                let s = step.get();
+                step.set(s + 1);
+                with_app(move |app| {
+                    match s % 4 {
+                        0 => app.ui.set_has_track(true),
+                        1 => app.fullscreen_app = true,
+                        2 => app.fullscreen_app = false,
+                        _ => app.ui.set_has_track(false),
+                    }
+                    app.layout();
+                })
+            });
+        }
         // Desenvolvimento: NOCTO_MODE=1|2|3 abre direto num modo, sem roubar o foco (para prints).
         if let Some(mode) = std::env::var("NOCTO_MODE").ok().and_then(|m| m.parse::<i32>().ok()) {
             if mode == DROP {
