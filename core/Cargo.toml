@@ -1,0 +1,13 @@
+[package]
+name = "nocto-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+ureq = "3.5.2"
+sha2 = "0.11.1"
+base64 = "0.23.1"
+getrandom = "0.4.3"

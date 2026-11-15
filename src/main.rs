@@ -1,0 +1,533 @@
+#![windows_subsystem = "windows"]
+
+mod media;
+mod win;
+
+use nocto_core::calendar::{self, Calendar};
+use nocto_core::commands::{self, Command};
+use nocto_core::config::{self, Config};
+use nocto_core::imgconv::{self, Format};
+use nocto_core::launcher::{self, Allowlist};
+use nocto_core::{keys, spotify, theme};
+use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
+use slint::{Color, ComponentHandle, ModelRc, VecModel};
+use std::cell::RefCell;
+use std::path::PathBuf;
+use std::time::Duration;
+
+slint::include_modules!();
+
+const PILL: i32 = 0;
+const BAR: i32 = 1;
+const CALENDAR: i32 = 2;
+const DROP: i32 = 3;
+
+const MONTHS: [&str; 12] = [
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+];
+const WEEKDAYS: [&str; 7] = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+
+struct App {
+    ui: Island,
+    hwnd: isize,
+    dir: PathBuf,
+    config: Config,
+    allow: Allowlist,
+    cal: Calendar,
+    view: (i32, u32),
+    selected: String,
+    prev_foreground: isize,
+    dropped: Option<PathBuf>,
+    /// Um app em tela cheia (ex.: jogo) está na frente: a pílula some.
+    fullscreen_app: bool,
+}
+
+thread_local! {
+    static APP: RefCell<Option<App>> = const { RefCell::new(None) };
+}
+
+/// Acessa o estado na thread da interface. Se ele já estiver em uso (evento disparado
+/// no meio de outra ação), a ação é adiada para o próximo giro do laço de eventos.
+fn with_app(f: impl FnOnce(&mut App) + 'static) {
+    APP.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut slot) => {
+            if let Some(app) = slot.as_mut() {
+                f(app);
+            }
+        }
+        Err(_) => slint::Timer::single_shot(Duration::ZERO, move || with_app(f)),
+    });
+}
+
+/// Agenda `f` na thread da interface a partir de qualquer thread.
+fn on_ui(f: impl FnOnce(&mut App) + Send + 'static) {
+    let _ = slint::invoke_from_event_loop(move || with_app(f));
+}
+
+fn color(c: [u8; 4]) -> Color {
+    Color::from_argb_u8(c[3], c[0], c[1], c[2])
+}
+
+fn iso_today() -> String {
+    let (y, m, d, ..) = win::local_time();
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+impl App {
+    fn layout(&self) {
+        let ui = &self.ui;
+        let mode = ui.get_mode();
+        let (w, h) = match mode {
+            BAR if ui.get_status().is_empty() => (580.0, 60.0),
+            BAR => (580.0, 88.0),
+            CALENDAR => (660.0, 340.0),
+            DROP => (420.0, 128.0),
+            _ if ui.get_has_track() => (340.0, 40.0),
+            _ => (230.0, 40.0),
+        };
+        let radius = if mode == PILL { h / 2.0 } else { 22.0 };
+        win::place(self.hwnd, w, h, ui.window().scale_factor(), radius);
+        win::show(self.hwnd, !(mode == PILL && self.fullscreen_app));
+    }
+
+    fn set_mode(&mut self, mode: i32) {
+        self.ui.set_mode(mode);
+        if mode == CALENDAR {
+            self.refresh_calendar();
+        }
+        self.layout();
+    }
+
+    fn set_status(&self, text: &str, error: bool) {
+        self.ui.set_status(text.into());
+        self.ui.set_status_error(error);
+        self.layout();
+    }
+
+    fn apply_theme(&self) {
+        let (_, _, _, h, m, _) = win::local_time();
+        let p = theme::palette(self.config.theme.resolve(h, m));
+        self.ui.set_glass(color(p.glass));
+        self.ui.set_accent(color(p.accent));
+        self.ui.set_ink(color(p.text));
+        self.ui.set_theme_label(self.config.theme.label().into());
+    }
+
+    fn toggle_bar(&mut self) {
+        if self.ui.get_mode() == BAR {
+            self.close(true);
+            return;
+        }
+        let fg = win::foreground();
+        if fg != self.hwnd {
+            self.prev_foreground = fg;
+        }
+        self.apply_theme();
+        self.ui.set_status("".into());
+        self.set_mode(BAR);
+        win::activate(self.hwnd);
+        self.ui.invoke_focus_input();
+    }
+
+    /// Volta à pílula; `restore` devolve o foco ao app que estava em uso.
+    fn close(&mut self, restore: bool) {
+        self.dropped = None;
+        self.ui.set_drop_name("".into());
+        self.ui.set_status("".into());
+        self.set_mode(PILL);
+        if restore && self.prev_foreground != 0 {
+            win::activate(self.prev_foreground);
+        }
+    }
+
+    fn spotify_config(&self) -> spotify::Config {
+        spotify::Config {
+            client_id: self.config.spotify_client_id.clone(),
+            token_path: self.dir.join("spotify-token.json"),
+        }
+    }
+
+    fn submit(&mut self, text: &str) {
+        match commands::parse(text) {
+            Command::Ignore => {}
+            cmd @ (Command::OpenApp(_) | Command::OpenUrl(_) | Command::OpenFolder(_)) => {
+                match launcher::run(&cmd, &self.allow) {
+                    Ok(()) => self.close(false),
+                    Err(e) => {
+                        let hint = if matches!(cmd, Command::OpenApp(_)) {
+                            " (edite allowlist.json para adicionar apps)"
+                        } else {
+                            ""
+                        };
+                        self.set_status(&format!("{e}{hint}"), true);
+                    }
+                }
+            }
+            Command::SpotifyPlay(q) => {
+                self.set_status(&format!("Procurando \"{q}\" no Spotify…"), false);
+                let cfg = self.spotify_config();
+                std::thread::spawn(move || {
+                    let result = spotify::play_query(&cfg, &q);
+                    on_ui(move |app| match result {
+                        Ok(msg) => {
+                            app.set_status(&msg, false);
+                            slint::Timer::single_shot(Duration::from_millis(1500), || {
+                                with_app(|app| {
+                                    if app.ui.get_mode() == BAR {
+                                        app.close(true);
+                                    }
+                                })
+                            });
+                        }
+                        Err(e) => app.set_status(&e, true),
+                    });
+                });
+            }
+            Command::SpotifyPause => {
+                media::play_pause();
+                self.close(true);
+            }
+            Command::SpotifyNext => {
+                media::next();
+                self.close(true);
+            }
+            Command::SpotifyLogin => {
+                self.set_status("Abrindo o login do Spotify no navegador…", false);
+                let cfg = self.spotify_config();
+                std::thread::spawn(move || {
+                    let result = spotify::login(&cfg);
+                    on_ui(move |app| match result {
+                        Ok(()) => app.set_status("Spotify conectado. Tente: toca <música>", false),
+                        Err(e) => app.set_status(&e, true),
+                    });
+                });
+            }
+            Command::ShowCalendar => {
+                self.set_mode(CALENDAR);
+                self.ui.invoke_focus_item_input();
+            }
+            Command::Quit => {
+                let _ = slint::quit_event_loop();
+            }
+            Command::Unknown(_) => self.set_status(
+                "Não conheço esse comando. Tente: abre spotify · toca <música> · agenda · pausa · próxima",
+                true,
+            ),
+        }
+    }
+
+    fn refresh_calendar(&self) {
+        let (y, m) = self.view;
+        let today = iso_today();
+        let days: Vec<DayCell> = calendar::month_grid(y, m)
+            .iter()
+            .map(|d| {
+                let iso = d.iso();
+                DayCell {
+                    label: d.day.to_string().into(),
+                    in_month: d.in_month,
+                    today: iso == today,
+                    selected: iso == self.selected,
+                    marked: !self.cal.on(&iso).is_empty(),
+                    iso: iso.into(),
+                }
+            })
+            .collect();
+        let items: Vec<Item> = self
+            .cal
+            .on(&self.selected)
+            .iter()
+            .map(|e| Item {
+                time: e.time.clone().unwrap_or_default().into(),
+                title: e.title.clone().into(),
+                done: e.done,
+            })
+            .collect();
+        let month = MONTHS[(m - 1) as usize];
+        let mut label = month.to_string();
+        label[..1].make_ascii_uppercase();
+        self.ui.set_month_label(format!("{label} {y}").into());
+        self.ui.set_selected_label(self.selected_label().into());
+        self.ui.set_days(ModelRc::new(VecModel::from(days)));
+        self.ui.set_items(ModelRc::new(VecModel::from(items)));
+    }
+
+    fn selected_label(&self) -> String {
+        let parts: Vec<u32> = self.selected.split('-').filter_map(|p| p.parse().ok()).collect();
+        let [y, m, d] = parts[..] else { return self.selected.clone() };
+        let wd = WEEKDAYS[calendar::weekday(y as i32, m, d) as usize];
+        format!("{wd}, {d} de {}", MONTHS[(m - 1) as usize])
+    }
+
+    fn save_calendar(&self) {
+        if let Err(e) = self.cal.save(&self.dir.join("calendar.json")) {
+            self.ui.set_selected_label(format!("Erro ao salvar: {e}").into());
+        }
+    }
+
+    fn shift_month(&mut self, delta: i32) {
+        let (y, m) = self.view;
+        let idx = y * 12 + (m as i32 - 1) + delta;
+        self.view = (idx.div_euclid(12), (idx.rem_euclid(12) + 1) as u32);
+        self.refresh_calendar();
+    }
+
+    fn convert(&mut self, fmt: &str) {
+        let Some(src) = self.dropped.clone() else { return };
+        let fmt = match fmt {
+            "jpeg" => Format::Jpeg,
+            "webp" => Format::WebP,
+            _ => Format::Png,
+        };
+        self.set_status("Convertendo…", false);
+        std::thread::spawn(move || {
+            let result = imgconv::convert_image(&src, fmt);
+            on_ui(move |app| match result {
+                Ok(out) => {
+                    let name = out.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    app.set_status(&format!("Salvo ao lado do original: {name}"), false);
+                }
+                Err(e) => app.set_status(&e, true),
+            });
+        });
+    }
+
+    fn foreground_changed(&mut self, fg: isize) {
+        let full = self.config.hide_in_fullscreen && win::is_fullscreen(fg);
+        if full != self.fullscreen_app {
+            self.fullscreen_app = full;
+            if self.ui.get_mode() == PILL {
+                win::show(self.hwnd, !full);
+            }
+        }
+        self.apply_theme();
+    }
+}
+
+fn data_dir() -> PathBuf {
+    let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let dir = base.join("Nocto");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+fn load_allowlist(dir: &std::path::Path) -> Allowlist {
+    let path = dir.join("allowlist.json");
+    if !path.exists() {
+        let _ = std::fs::write(&path, config::default_allowlist_json());
+    }
+    Allowlist::load(&path)
+}
+
+fn wire_callbacks(ui: &Island) {
+    ui.on_submit(|text| {
+        let text = text.to_string();
+        with_app(move |app| app.submit(&text));
+    });
+    ui.on_cancel(|| with_app(|app| app.close(true)));
+    ui.on_collapse(|| with_app(|app| app.close(false)));
+    ui.on_expand(|| {
+        with_app(|app| {
+            app.apply_theme();
+            app.set_mode(CALENDAR);
+            win::activate(app.hwnd);
+            app.ui.invoke_focus_item_input();
+        })
+    });
+    ui.on_play_pause(media::play_pause);
+    ui.on_next_track(media::next);
+    ui.on_prev_month(|| with_app(|app| app.shift_month(-1)));
+    ui.on_next_month(|| with_app(|app| app.shift_month(1)));
+    ui.on_pick_day(|iso| {
+        let iso = iso.to_string();
+        with_app(move |app| {
+            app.selected = iso;
+            app.refresh_calendar();
+            app.ui.invoke_focus_item_input();
+        })
+    });
+    ui.on_add_item(|text| {
+        let text = text.to_string();
+        with_app(move |app| {
+            if let Some(entry) = calendar::parse_entry(&app.selected, &text) {
+                app.cal.add(entry);
+                app.save_calendar();
+                app.refresh_calendar();
+            }
+        })
+    });
+    ui.on_toggle_item(|i| {
+        with_app(move |app| {
+            let date = app.selected.clone();
+            app.cal.toggle(&date, i as usize);
+            app.save_calendar();
+            app.refresh_calendar();
+        })
+    });
+    ui.on_remove_item(|i| {
+        with_app(move |app| {
+            let date = app.selected.clone();
+            app.cal.remove(&date, i as usize);
+            app.save_calendar();
+            app.refresh_calendar();
+        })
+    });
+    ui.on_cycle_theme(|| {
+        with_app(|app| {
+            app.config.theme = app.config.theme.next();
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.apply_theme();
+        })
+    });
+    ui.on_convert(|fmt| {
+        let fmt = fmt.to_string();
+        with_app(move |app| app.convert(&fmt));
+    });
+
+    // Arrastar e soltar arquivos e perda de foco vêm direto dos eventos da janela.
+    ui.window().on_winit_window_event(|_, event| {
+        match event {
+            WindowEvent::HoveredFile(_) => with_app(|app| {
+                if app.ui.get_mode() != DROP {
+                    app.dropped = None;
+                    app.ui.set_drop_name("".into());
+                    app.ui.set_status("".into());
+                    app.set_mode(DROP);
+                }
+            }),
+            WindowEvent::DroppedFile(path) => {
+                let path = path.clone();
+                with_app(move |app| {
+                    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    app.ui.set_drop_name(name.into());
+                    app.dropped = Some(path);
+                    app.ui.set_status("Converter para:".into());
+                    app.ui.set_status_error(false);
+                    app.set_mode(DROP);
+                })
+            }
+            WindowEvent::HoveredFileCancelled => with_app(|app| {
+                if app.dropped.is_none() {
+                    app.close(false);
+                }
+            }),
+            WindowEvent::Focused(false) => with_app(|app| {
+                let mode = app.ui.get_mode();
+                if mode == BAR || mode == CALENDAR {
+                    app.close(false);
+                }
+            }),
+            _ => {}
+        }
+        EventResult::Propagate
+    });
+}
+
+fn main() -> Result<(), slint::PlatformError> {
+    if !win::single_instance(|| on_ui(|app| {
+        if app.ui.get_mode() != BAR {
+            app.toggle_bar();
+        }
+    })) {
+        return Ok(());
+    }
+
+    let dir = data_dir();
+    let config_path = dir.join("config.json");
+    if !config_path.exists() {
+        let _ = Config::default().save(&config_path);
+    }
+    let config = Config::load(&config_path);
+
+    let ui = Island::new()?;
+    wire_callbacks(&ui);
+    ui.show()?;
+    start_when_ready(ui, config, dir);
+    slint::run_event_loop_until_quit()
+}
+
+/// O winit só cria a janela nativa depois que o laço de eventos começa.
+fn start_when_ready(ui: Island, config: Config, dir: PathBuf) {
+    slint::Timer::single_shot(Duration::from_millis(10), move || match win::hwnd_of(ui.window()) {
+        Some(hwnd) => start(ui, hwnd, config, dir),
+        None => start_when_ready(ui, config, dir),
+    });
+}
+
+fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
+    win::setup(hwnd);
+
+    let (y, m, ..) = win::local_time();
+    let hotkey_text = config.hotkey.clone();
+    let app = App {
+        ui: ui.clone_strong(),
+        hwnd,
+        allow: load_allowlist(&dir),
+        cal: Calendar::load(&dir.join("calendar.json")),
+        view: (y, m),
+        selected: iso_today(),
+        prev_foreground: 0,
+        dropped: None,
+        fullscreen_app: false,
+        config,
+        dir,
+    };
+    app.apply_theme();
+    APP.with(|cell| *cell.borrow_mut() = Some(app));
+
+    // Atalho global.
+    let notice = match keys::parse_hotkey(&hotkey_text) {
+        Ok(hk) => match win::spawn_hotkey(hk, || on_ui(|app| app.toggle_bar())) {
+            Ok(()) => format!("Nocto · {}", hotkey_text.replace('+', " + ")),
+            Err(_) => format!("Atalho {hotkey_text} ocupado: troque em config.json"),
+        },
+        Err(e) => e,
+    };
+    ui.set_notice(notice.into());
+    with_app(|app| {
+        app.set_mode(PILL);
+        // Já começa escondida se um jogo em tela cheia estiver na frente.
+        app.foreground_changed(win::foreground());
+        // Desenvolvimento: NOCTO_MODE=1|2|3 abre direto num modo, sem roubar o foco (para prints).
+        if let Some(mode) = std::env::var("NOCTO_MODE").ok().and_then(|m| m.parse::<i32>().ok()) {
+            if mode == DROP {
+                app.ui.set_drop_name("foto-perfil.png".into());
+                app.dropped = Some(PathBuf::from("foto-perfil.png"));
+            }
+            if mode == BAR || mode == DROP {
+                app.ui.set_status(std::env::var("NOCTO_STATUS").unwrap_or_default().into());
+            }
+            app.set_mode(mode);
+        }
+    });
+
+    // Música atual, por evento do Windows.
+    media::watch(|track| {
+        on_ui(move |app| {
+            let had = app.ui.get_has_track();
+            match &track {
+                Some(t) => {
+                    let label = if t.artist.is_empty() { t.title.clone() } else { format!("{} — {}", t.title, t.artist) };
+                    app.ui.set_track(label.into());
+                    app.ui.set_playing(t.playing);
+                }
+                None => app.ui.set_playing(false),
+            }
+            app.ui.set_has_track(track.is_some());
+            if had != track.is_some() && app.ui.get_mode() == PILL {
+                app.layout();
+            }
+        })
+    });
+
+    // Troca de tema: uma thread que dorme até a próxima virada (05h, 16h, 18h).
+    std::thread::spawn(|| loop {
+        let (_, _, _, h, m, s) = win::local_time();
+        std::thread::sleep(theme::next_switch_in(h, m, s) + Duration::from_secs(1));
+        on_ui(|app| app.apply_theme());
+    });
+
+    // Esconde a pílula quando um app em tela cheia (jogo, vídeo) vem para a frente.
+    win::watch_foreground(|fg| with_app(move |app| app.foreground_changed(fg)));
+}
