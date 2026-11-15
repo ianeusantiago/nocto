@@ -9,7 +9,7 @@ use nocto_core::commands::{self, Command};
 use nocto_core::config::{self, Config};
 use nocto_core::imgconv::{self, Format};
 use nocto_core::launcher::{self, Allowlist};
-use nocto_core::{keys, spotify, theme};
+use nocto_core::{format, keys, spotify, theme};
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
 use slint::{Color, ComponentHandle, ModelRc, VecModel};
 use std::cell::RefCell;
@@ -46,6 +46,13 @@ struct App {
     last_shape: std::cell::Cell<(f32, f32)>,
     region_spec: std::cell::Cell<(f32, f32, f32, f32)>,
     hidden: std::cell::Cell<bool>,
+    /// Última faixa informada pelo Windows (sem a capa, que já foi para a tela).
+    track: Option<media::Track>,
+    /// Página do painel: 0 música, 1 calendário.
+    page: i32,
+    progress_timer: slint::Timer,
+    /// Aviso que substitui a data na pílula (ex.: atalho ocupado).
+    pill_note: String,
 }
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
@@ -122,9 +129,10 @@ impl App {
         match ui.get_mode() {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
+            CALENDAR if self.page == 0 => (680.0, 214.0, 40.0),
             CALENDAR => (680.0, 340.0, 40.0),
             DROP => (440.0, 128.0, 36.0),
-            _ if ui.get_has_track() => (360.0, 38.0, 19.0),
+            _ if ui.get_show_music() => (360.0, 38.0, 19.0),
             _ => (230.0, 34.0, 17.0),
         }
     }
@@ -160,6 +168,84 @@ impl App {
             self.refresh_calendar();
         }
         self.layout();
+        self.update_progress_timer();
+    }
+
+    fn go_page(&mut self, page: i32) {
+        if page == self.page {
+            return;
+        }
+        self.page = page;
+        self.ui.set_page(page);
+        if page == 1 {
+            self.refresh_calendar();
+        }
+        self.layout();
+        self.update_progress_timer();
+    }
+
+    /// Abre o painel: na música se houver uma; senão, no calendário.
+    fn open_panel(&mut self, page: i32) {
+        self.page = page;
+        self.ui.set_page(page);
+        self.apply_theme();
+        self.set_mode(CALENDAR);
+        win::activate(self.hwnd);
+        if page == 1 {
+            self.ui.invoke_focus_item_input();
+        } else {
+            self.ui.invoke_focus_panel();
+        }
+    }
+
+    /// A barra de tempo só anda com a página de música aberta e a música tocando.
+    fn update_progress_timer(&self) {
+        self.refresh_progress();
+        let run = self.ui.get_mode() == CALENDAR && self.page == 0 && self.ui.get_playing();
+        if run && !self.progress_timer.running() {
+            self.progress_timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), || {
+                with_app(|app| app.refresh_progress())
+            });
+        } else if !run {
+            self.progress_timer.stop();
+        }
+    }
+
+    fn refresh_progress(&self) {
+        let Some(t) = &self.track else {
+            self.ui.set_progress(0.0);
+            self.ui.set_pos_text("0:00".into());
+            self.ui.set_dur_text("0:00".into());
+            return;
+        };
+        let elapsed = t.read_at.elapsed().as_millis() as u64;
+        let pos = format::position_now(t.position_ms, elapsed, t.playing, t.duration_ms);
+        self.ui.set_progress(format::progress(pos, t.duration_ms));
+        self.ui.set_pos_text(format::mmss(pos).into());
+        self.ui.set_dur_text(format::mmss(t.duration_ms).into());
+    }
+
+    /// Música ou relógio na pílula, conforme a escolha (automático, música ou relógio).
+    fn update_compact(&self) {
+        let show = self.config.compact.shows_music(self.ui.get_has_track(), self.ui.get_playing());
+        self.ui.set_compact_label(self.config.compact.label().into());
+        if show != self.ui.get_show_music() {
+            self.ui.set_show_music(show);
+            if self.ui.get_mode() == PILL {
+                self.layout();
+            }
+        }
+    }
+
+    /// Atualiza o relógio e agenda a próxima atualização para a virada do minuto.
+    fn refresh_clock(&self) {
+        let (y, m, d, h, min, s) = win::local_time();
+        self.ui.set_clock(format::clock(h, min).into());
+        let date = if self.pill_note.is_empty() { format::date_label(y, m, d) } else { self.pill_note.clone() };
+        self.ui.set_date_text(date.into());
+        slint::Timer::single_shot(Duration::from_secs((60 - s.min(59)) as u64), || {
+            with_app(|app| app.refresh_clock())
+        });
     }
 
     fn set_status(&self, text: &str, error: bool) {
@@ -270,10 +356,7 @@ impl App {
                     });
                 });
             }
-            Command::ShowCalendar => {
-                self.set_mode(CALENDAR);
-                self.ui.invoke_focus_item_input();
-            }
+            Command::ShowCalendar => self.open_panel(1),
             Command::Quit => {
                 let _ = slint::quit_event_loop();
             }
@@ -396,10 +479,17 @@ fn wire_callbacks(ui: &Island) {
     ui.on_collapse(|| with_app(|app| app.close(false)));
     ui.on_expand(|| {
         with_app(|app| {
-            app.apply_theme();
-            app.set_mode(CALENDAR);
-            win::activate(app.hwnd);
-            app.ui.invoke_focus_item_input();
+            let page = if app.ui.get_has_track() { 0 } else { 1 };
+            app.open_panel(page);
+        })
+    });
+    ui.on_prev_track(media::previous);
+    ui.on_go_page(|page| with_app(move |app| app.go_page(page)));
+    ui.on_cycle_compact(|| {
+        with_app(|app| {
+            app.config.compact = app.config.compact.next();
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.update_compact();
         })
     });
     ui.on_play_pause(media::play_pause);
@@ -548,6 +638,10 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         last_shape: std::cell::Cell::new((0.0, 0.0)),
         region_spec: std::cell::Cell::new((0.0, 0.0, 0.0, 0.0)),
         hidden: std::cell::Cell::new(false),
+        track: None,
+        page: 0,
+        progress_timer: slint::Timer::default(),
+        pill_note: String::new(),
         config,
         dir,
     };
@@ -562,8 +656,13 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         },
         Err(e) => e,
     };
-    ui.set_notice(notice.into());
-    with_app(|app| {
+    ui.set_notice(notice.clone().into());
+    with_app(move |app| {
+        if notice.starts_with("Atalho") || !notice.starts_with("Nocto") {
+            app.pill_note = notice;
+        }
+        app.refresh_clock();
+        app.update_compact();
         app.set_mode(PILL);
         // Já começa escondida se um jogo em tela cheia estiver na frente.
         app.foreground_changed(win::foreground());
@@ -595,6 +694,9 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
                 app.ui.set_status(std::env::var("NOCTO_STATUS").unwrap_or_default().into());
             }
             app.set_mode(mode);
+            if let Some(page) = std::env::var("NOCTO_PAGE").ok().and_then(|p| p.parse::<i32>().ok()) {
+                app.go_page(page);
+            }
         }
     });
 
@@ -602,16 +704,37 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
     media::watch(|track| {
         on_ui(move |app| {
             let had = app.ui.get_has_track();
+            let old_title = app.track.as_ref().map(|t| (t.title.clone(), t.artist.clone()));
             match &track {
                 Some(t) => {
                     let label = if t.artist.is_empty() { t.title.clone() } else { format!("{} — {}", t.title, t.artist) };
                     app.ui.set_track(label.into());
+                    app.ui.set_song_title(t.title.clone().into());
+                    app.ui.set_artist(t.artist.clone().into());
                     app.ui.set_playing(t.playing);
+                    app.ui.set_spotify(t.spotify);
+                    if let Some(cover) = &t.cover {
+                        let (w, h, px) = &**cover;
+                        let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(px, *w, *h);
+                        app.ui.set_cover(slint::Image::from_rgba8(buf));
+                        app.ui.set_has_cover(true);
+                    } else if old_title != Some((t.title.clone(), t.artist.clone())) {
+                        app.ui.set_has_cover(false);
+                    }
                 }
-                None => app.ui.set_playing(false),
+                None => {
+                    app.ui.set_playing(false);
+                    app.ui.set_has_cover(false);
+                }
             }
             app.ui.set_has_track(track.is_some());
-            if had != track.is_some() && app.ui.get_mode() == PILL {
+            app.track = track.map(|mut t| {
+                t.cover = None;
+                t
+            });
+            app.update_compact();
+            app.update_progress_timer();
+            if had != app.ui.get_has_track() && app.ui.get_mode() == PILL {
                 app.layout();
             }
         })

@@ -10,6 +10,8 @@ Máquina: Ryzen 7 + RTX 4050, Windows 11. Medido com `scripts/measure.ps1` (work
 | 2026-11-15 | Barra de comando aberta (15 s) | 23,1 MB | 3,7 MB | 0,00% |
 | 2026-11-15 | Calendário aberto (15 s) | 24,4 MB | 5,0 MB | 0,00% |
 | 2026-11-15 | v0.2: vidro do compositor + janela fixa, pílula parada (20 s) | 26,6 MB | 5,2 MB | 0,00% |
+| 2026-11-15 | Páginas + capa do álbum, pílula parada com relógio (20 s) | 29,9 MB | 5,7 MB | 0,00% |
+| 2026-11-15 | Página de música aberta, música pausada (15 s) | 30,8 MB | 6,4 MB | 0,00% |
 
 Executável release: ~8,8 MB.
 

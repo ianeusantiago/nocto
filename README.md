@@ -2,7 +2,7 @@
 
 Uma "Dynamic Island" para Windows, escrita em Rust. Uma ilha no estilo Dynamic Island, colada no topo da tela, com material de vidro inspirado no Liquid Glass, que vira barra de comando, calendário e conversor de imagens, e fica leve o bastante para não ser notada nem em jogo.
 
-**~27 MB de RAM e 0% de CPU parada** ([medições](docs/PERF.md)). Executável único de ~9 MB, sem navegador embutido.
+**~30 MB de RAM e 0% de CPU parada** ([medições](docs/PERF.md)). Executável único de ~9 MB, sem navegador embutido.
 
 ## O que faz
 
@@ -10,8 +10,10 @@ Uma "Dynamic Island" para Windows, escrita em Rust. Uma ilha no estilo Dynamic I
 |---|---|
 | **Atalho global** `Alt + Shift + Espaço` | Abre a barra de comando de qualquer app, inclusive jogos. `Esc` fecha e devolve o foco. |
 | **Comandos** | `abre spotify` · `abre github.com` · `abre C:\Projetos` · `toca <música>` · `pausa` · `próxima` · `agenda` · `conectar spotify` · `sair` |
-| **Música** | Mostra a faixa atual e tem play/pause/próxima, para Spotify ou qualquer player do Windows. Sem login. |
-| **Calendário** | Clique na pílula. Escolha o dia e digite `14:00 reunião` + Enter. Clique no item para concluir. Tudo fica num arquivo local. |
+| **Música** | Clique na ilha: capa do álbum, nome, artista, tempo e controles (⏮ ⏯ ⏭). Logo do Spotify quando a música vem dele. Funciona com qualquer player do Windows, sem login. |
+| **Páginas** | A ilha expandida tem páginas (música e calendário). Troque arrastando, com a roda do mouse, com as setas ← → ou clicando nas bolinhas do topo. |
+| **Pílula** | Mostra a música ou o relógio. O botão "Pílula" na página de música alterna entre automático (música só tocando), música e relógio. |
+| **Calendário** | Segunda página da ilha. Escolha o dia e digite `14:00 reunião` + Enter. Clique no item para concluir. Tudo fica num arquivo local. |
 | **Converter imagem** | Arraste uma imagem até a pílula e escolha PNG, JPEG ou WebP. O arquivo novo é salvo ao lado do original, sem sobrescrever. |
 | **Tema por horário** | Azul-céu das 05h às 16h, laranja até as 18h, azul-noite depois. Troca com fade. O botão no calendário fixa um tema. |
 | **Modo jogo** | Se o app da frente está em tela cheia, a pílula some sozinha. O atalho continua valendo. |

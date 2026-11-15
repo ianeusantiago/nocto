@@ -6,3 +6,4 @@ pub mod theme;
 pub mod spotify;
 pub mod config;
 pub mod keys;
+pub mod format;

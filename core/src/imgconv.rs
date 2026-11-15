@@ -56,6 +56,19 @@ pub fn convert_image(src: &Path, to: Format) -> Result<PathBuf, String> {
     Ok(out)
 }
 
+/// Decodifica uma imagem (ex.: capa do álbum) para RGBA, encolhendo para caber em
+/// `max` px no lado maior. Devolve (largura, altura, pixels).
+pub fn decode_rgba(bytes: &[u8], max: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let img = image::load_from_memory(bytes).ok()?;
+    let img = if img.width() > max || img.height() > max {
+        img.resize(max, max, image::imageops::FilterType::Triangle)
+    } else {
+        img
+    };
+    let rgba = img.to_rgba8();
+    Some((rgba.width(), rgba.height(), rgba.into_raw()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +124,30 @@ mod tests {
         assert_ne!(a, b);
         assert_ne!(c, src);
         assert!(a.exists() && b.exists() && c.exists());
+    }
+}
+
+#[cfg(test)]
+mod decode_tests {
+    use super::*;
+
+    #[test]
+    fn decodes_png_bytes_to_rgba() {
+        let mut bytes = Vec::new();
+        image::RgbaImage::from_pixel(3, 2, image::Rgba([9, 8, 7, 255]))
+            .write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Png)
+            .unwrap();
+        let (w, h, px) = decode_rgba(&bytes, 512).unwrap();
+        assert_eq!((w, h), (3, 2));
+        assert_eq!(&px[..4], &[9, 8, 7, 255]);
+        assert!(decode_rgba(b"lixo", 512).is_none());
+    }
+    #[test]
+    fn large_covers_are_shrunk() {
+        let mut bytes = Vec::new();
+        image::RgbaImage::new(600, 300).write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Png).unwrap();
+        let (w, h, px) = decode_rgba(&bytes, 200).unwrap();
+        assert_eq!((w, h), (200, 100));
+        assert_eq!(px.len(), 200 * 100 * 4);
     }
 }
