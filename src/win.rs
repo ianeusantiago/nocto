@@ -163,6 +163,22 @@ pub fn activate(raw: isize) {
     }
 }
 
+/// Nome do executável de um processo, em minúsculas (ex.: "spotify.exe").
+pub fn process_name(pid: u32) -> Option<String> {
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; 512];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+        let _ = CloseHandle(process);
+        if !ok {
+            return None;
+        }
+        let path = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
+        Some(path.rsplit(['\\', '/']).next().unwrap_or(&path).to_string())
+    }
+}
+
 /// A janela é de um programa de captura de tela?
 fn is_capture_tool(hwnd: HWND) -> bool {
     const TOOLS: [&str; 7] = [
@@ -174,22 +190,11 @@ fn is_capture_tool(hwnd: HWND) -> bool {
         "flameshot.exe",
         "screensketch.exe",
     ];
+    let mut pid = 0u32;
     unsafe {
-        let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
-            return false;
-        };
-        let mut buf = [0u16; 512];
-        let mut len = buf.len() as u32;
-        let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
-        let _ = CloseHandle(process);
-        if !ok {
-            return false;
-        }
-        let path = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
-        TOOLS.iter().any(|t| path.ends_with(t))
     }
+    process_name(pid).is_some_and(|n| TOOLS.contains(&n.as_str()))
 }
 
 /// O app em primeiro plano ocupa o monitor inteiro (jogo, vídeo em tela cheia)?

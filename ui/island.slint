@@ -54,6 +54,70 @@ component SpotifyLogo inherits Rectangle {
     }
 }
 
+// Knob de volume (estilo FL Studio): anel de luzes que acende até o valor e um
+// marcador no botão. Arraste para cima/baixo ou gire a roda do mouse.
+component Knob inherits Rectangle {
+    in-out property <float> value: 0.5;
+    in property <color> ink;
+    in property <color> accent;
+    in property <bool> active: true;
+    callback changed(float);
+    property <float> start-value;
+    property <length> start-y;
+    width: 64px;
+    height: 64px;
+    opacity: root.active ? 1 : 0.4;
+    for i in 25: Rectangle {
+        property <angle> a: -135deg + i * 11.25deg;
+        width: 4px;
+        height: 4px;
+        border-radius: 2px;
+        x: root.width / 2 + 28px * sin(self.a) - 2px;
+        y: root.height / 2 - 28px * cos(self.a) - 2px;
+        background: i / 24 <= root.value + 0.001 ? root.accent : root.ink.with-alpha(0.18);
+    }
+    Rectangle {
+        x: 12px;
+        y: 12px;
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
+        background: root.ink.with-alpha(knob-touch.has-hover ? 0.2 : 0.12);
+        border-width: 1px;
+        border-color: root.ink.with-alpha(0.28);
+        property <angle> a: -135deg + root.value * 270deg;
+        Rectangle {
+            width: 5px;
+            height: 5px;
+            border-radius: 2.5px;
+            background: root.ink;
+            x: parent.width / 2 + 12px * sin(parent.a) - 2.5px;
+            y: parent.height / 2 - 12px * cos(parent.a) - 2.5px;
+        }
+    }
+    knob-touch := TouchArea {
+        enabled: root.active;
+        mouse-cursor: ns-resize;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.start-value = root.value;
+                root.start-y = self.mouse-y;
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.value = max(0, min(1, root.start-value + (root.start-y - self.mouse-y) / 150px));
+                root.changed(root.value);
+            }
+        }
+        scroll-event(e) => {
+            root.value = max(0, min(1, root.value + (e.delta-y > 0 ? 0.05 : -0.05)));
+            root.changed(root.value);
+            accept
+        }
+    }
+}
+
 component Glyph inherits Text {
     font-family: "Segoe MDL2 Assets";
     vertical-alignment: center;
@@ -152,6 +216,9 @@ export component Island inherits Window {
     in property <string> clock: "00:00";
     in property <string> date-text;
     in property <string> compact-label;
+    // Volume do Spotify (0–1) e se há sessão de áudio dele para controlar.
+    in-out property <float> volume: 0.5;
+    in property <bool> has-volume;
 
     callback submit(string);
     callback cancel();
@@ -162,6 +229,7 @@ export component Island inherits Window {
     callback prev-track();
     callback go-page(int);
     callback cycle-compact();
+    callback volume-changed(float);
     callback prev-month();
     callback next-month();
     callback pick-day(string);
@@ -512,6 +580,25 @@ export component Island inherits Window {
                                         size: 15px;
                                         clicked => { root.next-track(); }
                                     }
+                                }
+                            }
+                            VerticalLayout {
+                                width: 72px;
+                                alignment: center;
+                                spacing: 4px;
+                                Knob {
+                                    x: (parent.width - self.width) / 2;
+                                    value <=> root.volume;
+                                    active: root.has-volume;
+                                    ink: root.ink;
+                                    accent: root.accent;
+                                    changed(v) => { root.volume-changed(v); }
+                                }
+                                Text {
+                                    text: root.has-volume ? "Vol " + round(root.volume * 100) + "%" : "Vol —";
+                                    color: root.ink.with-alpha(0.7);
+                                    font-size: 11px;
+                                    horizontal-alignment: center;
                                 }
                             }
                         }

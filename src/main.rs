@@ -2,6 +2,7 @@
 
 mod glass;
 mod media;
+mod volume;
 mod win;
 
 use nocto_core::calendar::{self, Calendar};
@@ -53,6 +54,7 @@ struct App {
     progress_timer: slint::Timer,
     /// Aviso que substitui a data na pílula (ex.: atalho ocupado).
     pill_note: String,
+    volume: volume::Volume,
 }
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
@@ -172,6 +174,7 @@ impl App {
         self.ui.set_mode(mode);
         if mode == CALENDAR {
             self.refresh_calendar();
+            self.refresh_volume();
         }
         self.layout();
         self.update_progress_timer();
@@ -202,6 +205,18 @@ impl App {
         } else {
             self.ui.invoke_focus_panel();
         }
+    }
+
+    /// Lê o volume do Spotify no mixer do Windows e mostra no knob.
+    fn refresh_volume(&self) {
+        self.volume.get(|v| {
+            on_ui(move |app| {
+                app.ui.set_has_volume(v.is_some());
+                if let Some(v) = v {
+                    app.ui.set_volume(v);
+                }
+            })
+        });
     }
 
     /// A barra de tempo só anda com a página de música aberta e a música tocando.
@@ -511,6 +526,19 @@ fn wire_callbacks(ui: &Island) {
     });
     ui.on_prev_track(media::previous);
     ui.on_go_page(|page| with_app(move |app| app.go_page(page)));
+    ui.on_volume_changed(|v| {
+        // Desenvolvimento: NOCTO_DEBUG registra cada mudança de volume.
+        if std::env::var_os("NOCTO_DEBUG").is_some() {
+            if let Some(dir) = std::env::var_os("APPDATA") {
+                use std::io::Write;
+                let path = std::path::Path::new(&dir).join("Nocto").join("debug.log");
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                    let _ = writeln!(f, "volume-changed {v:.3}");
+                }
+            }
+        }
+        with_app(move |app| app.volume.set(v))
+    });
     ui.on_cycle_compact(|| {
         with_app(|app| {
             app.config.compact = app.config.compact.next();
@@ -674,6 +702,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         page: 0,
         progress_timer: slint::Timer::default(),
         pill_note: String::new(),
+        volume: volume::Volume::new(),
         config,
         dir,
     };
@@ -698,6 +727,10 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         app.set_mode(PILL);
         // Já começa escondida se um jogo em tela cheia estiver na frente.
         app.foreground_changed(win::foreground());
+        // Desenvolvimento: NOCTO_SETVOL=0.0..1.0 define o volume do Spotify ao abrir.
+        if let Some(v) = std::env::var("NOCTO_SETVOL").ok().and_then(|v| v.parse::<f32>().ok()) {
+            app.volume.set(v);
+        }
         // Desenvolvimento: NOCTO_PLAYING simula música tocando na pílula.
         if std::env::var_os("NOCTO_PLAYING").is_some() {
             app.ui.set_track("Dark Fantasy — Kanye West".into());
