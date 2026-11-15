@@ -111,7 +111,13 @@ impl App {
         }
     }
 
+    /// Faz o Slint redesenhar e copiar a janela inteira para a tela (ver `repaint` na UI).
+    fn force_repaint(&self) {
+        self.ui.set_repaint(self.ui.get_repaint().wrapping_add(1));
+    }
+
     fn apply_region(&self) {
+        self.force_repaint();
         let (x, w, h, r) = self.region_spec.get();
         for hwnd in self.hwnds() {
             if self.hidden.get() {
@@ -569,12 +575,18 @@ fn wire_callbacks(ui: &Island) {
                     app.close(false);
                 }
             }),
-            WindowEvent::Focused(false) => with_app(|app| {
-                let mode = app.ui.get_mode();
-                if mode == BAR || mode == CALENDAR {
-                    app.close(false);
-                }
-            }),
+            WindowEvent::Focused(_) | WindowEvent::Resized(_) | WindowEvent::Occluded(false) | WindowEvent::ScaleFactorChanged { .. } => {
+                let lost_focus = matches!(event, WindowEvent::Focused(false));
+                with_app(move |app| {
+                    app.force_repaint();
+                    if lost_focus {
+                        let mode = app.ui.get_mode();
+                        if mode == BAR || mode == CALENDAR {
+                            app.close(false);
+                        }
+                    }
+                })
+            }
             _ => {}
         }
         EventResult::Propagate
@@ -666,6 +678,14 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         app.set_mode(PILL);
         // Já começa escondida se um jogo em tela cheia estiver na frente.
         app.foreground_changed(win::foreground());
+        // Desenvolvimento: NOCTO_PLAYING simula música tocando na pílula.
+        if std::env::var_os("NOCTO_PLAYING").is_some() {
+            app.ui.set_track("Dark Fantasy — Kanye West".into());
+            app.ui.set_has_track(true);
+            app.ui.set_playing(true);
+            app.ui.set_spotify(true);
+            app.update_compact();
+        }
         // Desenvolvimento: NOCTO_CYCLE alterna sozinho entre os formatos (para reproduzir bugs).
         if std::env::var_os("NOCTO_CYCLE").is_some() {
             let timer = Box::leak(Box::new(slint::Timer::default()));
@@ -699,6 +719,9 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
 
     // Música atual, por evento do Windows.
     media::watch(|track| {
+        if std::env::var_os("NOCTO_PLAYING").is_some() {
+            return; // desenvolvimento: mantém a música simulada
+        }
         on_ui(move |app| {
             let had = app.ui.get_has_track();
             let old_title = app.track.as_ref().map(|t| (t.title.clone(), t.artist.clone()));

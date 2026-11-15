@@ -190,6 +190,19 @@ export component Island inherits Window {
 
     // A janela é fixa e transparente; só a área da ilha tem conteúdo. O morph usa a mesma
     // curva e duração do vidro (glass.rs: MORPH_MS e a bézier com "quique").
+    // Ao mudar, marca a janela inteira para ser redesenhada e copiada para a tela.
+    // O Rust incrementa nos momentos em que o Windows pode descartar a imagem da janela
+    // (clique, foco, mudança de área); sem isso, só a parte que mudou voltava e o resto
+    // ficava branco.
+    in property <int> repaint;
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: mod(root.repaint, 2) == 0 ? #00000000 : #00000001;
+    }
+
     shell := Rectangle {
         x: (root.width - root.island-w) / 2;
         y: 0;
