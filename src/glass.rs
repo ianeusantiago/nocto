@@ -39,6 +39,7 @@ pub struct Glass {
     island: ContainerVisual,
     geometry: CompositionRoundedRectangleGeometry,
     tint: CompositionColorBrush,
+    blur: SpriteVisual,
 }
 
 fn color(argb: [u8; 4]) -> Color {
@@ -124,16 +125,17 @@ impl Glass {
         geometry.StartAnimation(&HSTRING::from("Size"), &follow)?;
         island.SetClip(&compositor.CreateGeometricClipWithGeometry(&geometry)?)?;
 
-        let layer = |brush: &CompositionBrush| -> Result<()> {
+        let layer = |brush: &CompositionBrush| -> Result<SpriteVisual> {
             let sprite = compositor.CreateSpriteVisual()?;
             sprite.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
             sprite.SetBrush(brush)?;
             island.Children()?.InsertAtTop(&sprite)?;
-            Ok(())
+            Ok(sprite)
         };
 
-        // 1. Desfoque do que está atrás (sem suporte, vira cor sólida).
-        layer(&compositor.CreateHostBackdropBrush()?.cast()?)?;
+        // 1. Desfoque do que está atrás (sem suporte, vira cor sólida). Com opacidade
+        // menor que 1, parte do fundo aparece nítido: o vidro fica mais "líquido".
+        let blur = layer(&compositor.CreateHostBackdropBrush()?.cast()?)?;
 
         // 2. Cor do horário.
         let tint = compositor.CreateColorBrushWithColor(color([150, 11, 42, 68]))?;
@@ -170,7 +172,7 @@ impl Glass {
         shapes.Shapes()?.Append(&rim)?;
         island.Children()?.InsertAtTop(&shapes)?;
 
-        Ok(Self { hwnd: hwnd.0 as isize, _queue: queue, _target: target, compositor, island, geometry, tint })
+        Ok(Self { hwnd: hwnd.0 as isize, _queue: queue, _target: target, compositor, island, geometry, tint, blur })
     }
 
     /// Leva a ilha para a posição/tamanho/raio (pixels físicos). Com `animate`, usa uma
@@ -202,6 +204,11 @@ impl Glass {
         self.island.StartAnimation(&HSTRING::from("Offset"), &v3)?;
         self.geometry.StartAnimation(&HSTRING::from("CornerRadius"), &v2(corner)?)?;
         Ok(())
+    }
+
+    /// Quanto do desfoque aparece (1 = fosco; menor = mais transparente).
+    pub fn set_blur(&self, opacity: f32) -> Result<()> {
+        self.blur.SetOpacity(opacity)
     }
 
     /// Troca a cor do vidro com um fade lento (ARGB).

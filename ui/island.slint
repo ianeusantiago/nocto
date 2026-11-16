@@ -342,6 +342,8 @@ export component Island inherits Window {
     in property <bool> hide-fullscreen: true;
     in property <string> hotkey-label;
     in property <string> compact-short;
+    in property <string> open-page-label;
+    in property <string> glass-label;
     in property <string> settings-note;
     in property <bool> drop-target;
     // Aviso de mensagem do WhatsApp (modo 4).
@@ -370,6 +372,8 @@ export component Island inherits Window {
     callback prev-track();
     callback go-page(int);
     callback cycle-compact();
+    callback cycle-open-page();
+    callback cycle-glass();
     callback volume-changed(float);
     callback remove-app(string);
     callback toggle-fullscreen();
@@ -1129,7 +1133,7 @@ export component Island inherits Window {
                         x: parent.width * 3 / 4;
                         y: 0;
                         width: parent.width / 4;
-                        height: 420px;
+                        height: 500px;
                         HorizontalLayout {
                             padding: 20px;
                             padding-top: 32px;
@@ -1152,6 +1156,16 @@ export component Island inherits Window {
                                     height: 30px;
                                     Text { text: "Pílula mostra"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
                                     Chip { text: root.compact-short; ink: root.ink; accent: root.accent; clicked => { root.cycle-compact(); } }
+                                }
+                                HorizontalLayout {
+                                    height: 30px;
+                                    Text { text: "Abrir primeiro"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Chip { text: root.open-page-label; ink: root.ink; accent: root.accent; clicked => { root.cycle-open-page(); } }
+                                }
+                                HorizontalLayout {
+                                    height: 30px;
+                                    Text { text: "Vidro"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Chip { text: root.glass-label; ink: root.ink; accent: root.accent; clicked => { root.cycle-glass(); } }
                                 }
                                 HorizontalLayout {
                                     height: 30px;

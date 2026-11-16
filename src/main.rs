@@ -82,7 +82,7 @@ struct App {
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
 const WINDOW_W: f32 = 720.0;
-const WINDOW_H: f32 = 440.0;
+const WINDOW_H: f32 = 520.0;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -182,7 +182,7 @@ impl App {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
             CALENDAR if self.page == 0 => (680.0, 214.0, 40.0),
-            CALENDAR if self.page == 3 => (680.0, 420.0, 40.0),
+            CALENDAR if self.page == 3 => (680.0, 500.0, 40.0),
             NOTIFY => (440.0, 64.0, 32.0),
             CALENDAR => (680.0, 340.0, 40.0),
             DROP if self.ui.get_has_drop_preview() => (580.0, 150.0, 40.0),
@@ -355,6 +355,8 @@ impl App {
         self.ui.set_whatsapp_on(self.config.whatsapp);
         self.ui.set_whatsapp_preview(self.config.whatsapp_preview);
         self.ui.set_wake_on(self.config.wake_word);
+        self.ui.set_open_page_label(self.config.open_page.label().into());
+        self.ui.set_glass_label(self.config.glass.label().into());
     }
 
     /// Ícone do app (do .exe ou atalho), lido uma vez e guardado.
@@ -507,7 +509,9 @@ impl App {
         self.ui.set_glass(color(p.glass));
         if let Some(glass) = &self.glass {
             let [r, g, b, a] = p.glass;
-            let _ = glass.set_tint([a, r, g, b], 3000);
+            let (blur, tint) = self.config.glass.levels();
+            let _ = glass.set_blur(blur);
+            let _ = glass.set_tint([(a as f32 * tint) as u8, r, g, b], 3000);
         }
         self.ui.set_accent(color(p.accent));
         self.ui.set_ink(color(p.text));
@@ -820,7 +824,8 @@ fn wire_callbacks(ui: &Island) {
     ui.on_expand(|| {
         with_app(|app| {
             // Mensagem não lida > música tocando > agenda.
-            let page = if app.ui.get_wa_unread() + app.ui.get_mail_unread() > 0 { 2 } else if app.ui.get_playing() { 0 } else { 1 };
+            let unread = app.ui.get_wa_unread() + app.ui.get_mail_unread() > 0;
+            let page = app.config.open_page.page(unread, app.ui.get_playing());
             app.open_panel(page);
         })
     });
@@ -936,6 +941,21 @@ fn wire_callbacks(ui: &Island) {
             }
         }
         with_app(move |app| app.volume.set(v))
+    });
+    ui.on_cycle_open_page(|| {
+        with_app(|app| {
+            app.config.open_page = app.config.open_page.next();
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.refresh_settings();
+        })
+    });
+    ui.on_cycle_glass(|| {
+        with_app(|app| {
+            app.config.glass = app.config.glass.next();
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.refresh_settings();
+            app.apply_theme();
+        })
     });
     ui.on_cycle_compact(|| {
         with_app(|app| {

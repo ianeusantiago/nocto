@@ -85,6 +85,91 @@ impl CompactMode {
     }
 }
 
+/// Página que abre ao clicar na pílula.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum OpenPage {
+    /// Mensagem não lida > música tocando > agenda.
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "musica")]
+    Music,
+    #[serde(rename = "agenda")]
+    Calendar,
+    #[serde(rename = "mensagens")]
+    Messages,
+}
+
+impl OpenPage {
+    pub fn next(self) -> Self {
+        match self {
+            OpenPage::Auto => OpenPage::Music,
+            OpenPage::Music => OpenPage::Calendar,
+            OpenPage::Calendar => OpenPage::Messages,
+            OpenPage::Messages => OpenPage::Auto,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            OpenPage::Auto => "Automático",
+            OpenPage::Music => "Música",
+            OpenPage::Calendar => "Agenda",
+            OpenPage::Messages => "Mensagens",
+        }
+    }
+    /// Página (0 música, 1 agenda, 2 mensagens) conforme a escolha e o estado.
+    pub fn page(self, unread: bool, playing: bool) -> i32 {
+        match self {
+            OpenPage::Auto if unread => 2,
+            OpenPage::Auto if playing => 0,
+            OpenPage::Auto => 1,
+            OpenPage::Music => 0,
+            OpenPage::Calendar => 1,
+            OpenPage::Messages => 2,
+        }
+    }
+}
+
+/// Quanto o vidro deixa ver o que está atrás.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum GlassMode {
+    /// Transparente como o Liquid Glass da Apple: desfoque leve e pouca cor.
+    #[default]
+    #[serde(rename = "liquid")]
+    Liquid,
+    /// Bem transparente: quase só a borda de luz.
+    #[serde(rename = "claro")]
+    Clear,
+    /// Fosco: desfoque forte e mais cor (o visual antigo; melhor para ler).
+    #[serde(rename = "fosco")]
+    Frosted,
+}
+
+impl GlassMode {
+    pub fn next(self) -> Self {
+        match self {
+            GlassMode::Liquid => GlassMode::Clear,
+            GlassMode::Clear => GlassMode::Frosted,
+            GlassMode::Frosted => GlassMode::Liquid,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            GlassMode::Liquid => "Liquid Glass",
+            GlassMode::Clear => "Bem transparente",
+            GlassMode::Frosted => "Fosco",
+        }
+    }
+    /// (opacidade do desfoque, multiplicador da cor do horário)
+    pub fn levels(self) -> (f32, f32) {
+        match self {
+            GlassMode::Liquid => (1.0, 0.35),
+            GlassMode::Clear => (0.88, 0.12),
+            GlassMode::Frosted => (1.0, 1.0),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -100,6 +185,8 @@ pub struct Config {
     pub whatsapp_preview: bool,
     /// Dizer "Nocto" abre a barra e começa a ouvir (microfone sempre ligado; desligado por padrão).
     pub wake_word: bool,
+    pub open_page: OpenPage,
+    pub glass: GlassMode,
 }
 
 impl Default for Config {
@@ -113,6 +200,8 @@ impl Default for Config {
             whatsapp: true,
             whatsapp_preview: true,
             wake_word: false,
+            open_page: OpenPage::Auto,
+            glass: GlassMode::Liquid,
         }
     }
 }
