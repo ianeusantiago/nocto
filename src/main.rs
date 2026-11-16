@@ -638,6 +638,27 @@ impl App {
 
     fn convert(&mut self, fmt: &str) {
         let Some(src) = self.dropped.clone() else { return };
+        if fmt == "nobg" {
+            let dir = self.dir.clone();
+            let first = !dir.join("silueta.onnx").exists();
+            self.set_status(if first { "Baixando o modelo (44 MB, só na primeira vez)…" } else { "Removendo o fundo… (uns 10 s)" }, false);
+            std::thread::spawn(move || {
+                let result = nocto_core::bgremove::ensure_model(&dir).and_then(|model| {
+                    if first {
+                        on_ui(|app| app.set_status("Removendo o fundo… (uns 10 s)", false));
+                    }
+                    nocto_core::bgremove::remove_background(&src, &model)
+                });
+                on_ui(move |app| match result {
+                    Ok(out) => {
+                        let name = out.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        app.set_status(&format!("Salvo ao lado do original: {name}"), false);
+                    }
+                    Err(e) => app.set_status(&e, true),
+                });
+            });
+            return;
+        }
         let fmt = match fmt {
             "jpeg" => Format::Jpeg,
             "webp" => Format::WebP,

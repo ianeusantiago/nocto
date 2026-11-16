@@ -10,7 +10,7 @@ Tudo gratuito, sem serviço pago. Ordem definida pelo autor: **A, D, E, B, C**, 
 | B | ✅ **Configurações** (aba na ilha) | Página nova: tema, o que a pílula mostra, atalho, esconder em tela cheia. | Base para C. |
 | C | ✅ **Adicionar apps por arraste** | Em Configurações → Comandos → "Adicionar app": a ilha pede para arrastar um app (.exe ou atalho .lnk); o Nocto lê o nome e o ícone, mostra uma animação de "adicionado" e daí `abre brave` funciona. Lista com remover. | Grava na `allowlist.json` (que hoje só se edita à mão). |
 | F ✅ | **Notificações do WhatsApp** | Página/aviso na ilha quando chega mensagem. | Lê as notificações do app WhatsApp do Windows (API de notificações do Windows); grátis. Pede permissão de acesso às notificações uma vez. |
-| G | **Remover fundo de imagem** | Botão a mais ao soltar uma imagem. | Modelo de IA baixado só no primeiro uso. |
+| G ✅ | **Remover fundo de imagem** | Botão a mais ao soltar uma imagem. | Modelo de IA baixado só no primeiro uso. |
 | H | **E-mail** | Página com e-mails não lidos do Gmail. | Login com o Google uma vez. |
 | I | **Comando por voz** | Falar com a barra em vez de digitar. | Reconhecimento de fala local (grátis, mais pesado). |
 | J | **Medir FPS em jogo** | Com e sem o Nocto, três execuções. | Prioridade de leveza ainda sem número. |

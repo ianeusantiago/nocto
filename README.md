@@ -17,7 +17,7 @@ Uma "Dynamic Island" para Windows, escrita em Rust. Uma ilha no estilo Dynamic I
 | **Playlist** | `toca playlist only day` toca uma playlist sua pelo nome (digite `conectar spotify` uma vez antes). |
 | **Pílula** | Mostra a música ou o relógio. O botão "Pílula" na página de música alterna entre automático (música só tocando), música e relógio. |
 | **Calendário** | Segunda página da ilha. Escolha o dia e digite `14:00 reunião` + Enter. Clique no item para concluir. Tudo fica num arquivo local. |
-| **Converter imagem** | Arraste uma imagem até a pílula e escolha PNG, JPEG ou WebP. O arquivo novo é salvo ao lado do original, sem sobrescrever. |
+| **Converter imagem** | Arraste uma imagem até a pílula e escolha PNG, JPEG, WebP ou **Remover fundo** (local e grátis; baixa um modelo de 44 MB no primeiro uso, leva uns 10 s). O arquivo novo é salvo ao lado do original, sem sobrescrever. |
 | **Tema por horário** | Azul-céu das 05h às 16h, laranja até as 18h, azul-noite depois. Troca com fade. O botão no calendário fixa um tema. |
 | **Modo jogo** | Se o app da frente está em tela cheia, a pílula some sozinha. O atalho continua valendo. |
 | **WhatsApp** | Mensagem nova do app WhatsApp do Windows expande a ilha por 6 s (clique abre o WhatsApp). Nas Configurações dá para desligar ou esconder o texto. |
