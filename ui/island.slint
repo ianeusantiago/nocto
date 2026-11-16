@@ -10,6 +10,12 @@ export struct DayCell {
     marked: bool,
 }
 
+export struct WaMsg {
+    sender: string,
+    text: string,
+    time: string,
+}
+
 export struct Item {
     time: string,
     title: string,
@@ -258,6 +264,10 @@ export component Island inherits Window {
 
     // Página do painel (0 música, 1 calendário) e dados da música.
     in property <int> page: 0;
+    // Falso ao abrir o painel: entra direto na página, sem deslizar.
+    in property <bool> slide: true;
+    in property <[WaMsg]> wa-msgs;
+    in property <int> wa-unread;
     in property <string> song-title;
     in property <string> artist;
     in property <bool> spotify;
@@ -539,7 +549,7 @@ export component Island inherits Window {
                     return accept;
                 }
                 if (event.text == Key.RightArrow) {
-                    root.go-page(min(2, root.page + 1));
+                    root.go-page(min(3, root.page + 1));
                     return accept;
                 }
                 reject
@@ -553,7 +563,7 @@ export component Island inherits Window {
                     }
                     if (e.kind == PointerEventKind.up) {
                         if (self.mouse-x - self.start-x < -60px) {
-                            root.go-page(min(2, root.page + 1));
+                            root.go-page(min(3, root.page + 1));
                         } else if (self.mouse-x - self.start-x > 60px) {
                             root.go-page(max(0, root.page - 1));
                         }
@@ -561,7 +571,7 @@ export component Island inherits Window {
                 }
                 scroll-event(e) => {
                     if (e.delta-y < 0 || e.delta-x < 0) {
-                        root.go-page(min(2, root.page + 1));
+                        root.go-page(min(3, root.page + 1));
                     } else if (e.delta-y > 0 || e.delta-x > 0) {
                         root.go-page(max(0, root.page - 1));
                     }
@@ -570,9 +580,9 @@ export component Island inherits Window {
                 Rectangle {
                     x: -root.page * parent.width;
                     y: 0;
-                    width: parent.width * 3;
+                    width: parent.width * 4;
                     height: parent.height;
-                    animate x { duration: 380ms; easing: cubic-bezier(0.25, 1.1, 0.32, 1); }
+                    animate x { duration: root.slide ? 380ms : 0ms; easing: cubic-bezier(0.25, 1.1, 0.32, 1); }
                     // Página 1: música (capa, nome, artista, tempo e controles).
                     Rectangle {
                         x: 0;
@@ -722,9 +732,9 @@ export component Island inherits Window {
                     }
                     // Página 2: calendário.
                     Rectangle {
-                        x: parent.width / 3;
+                        x: parent.width / 4;
                         y: 0;
-                        width: parent.width / 3;
+                        width: parent.width / 4;
                         height: 340px;
                     HorizontalLayout {
                         padding: 18px;
@@ -916,11 +926,58 @@ export component Island inherits Window {
                         }
                     }
                     }
-                    // Página 3: configurações e apps do "abre".
+                    // Página 3: mensagens do WhatsApp que chegaram.
                     Rectangle {
-                        x: parent.width * 2 / 3;
+                        x: parent.width * 2 / 4;
                         y: 0;
-                        width: parent.width / 3;
+                        width: parent.width / 4;
+                        height: 340px;
+                        VerticalLayout {
+                            padding: 22px;
+                            padding-top: 30px;
+                            spacing: 10px;
+                            HorizontalLayout {
+                                spacing: 10px;
+                                height: 28px;
+                                WhatsAppLogo { size: 26px; }
+                                Text { text: "Mensagens do WhatsApp"; color: root.ink; font-size: 17px; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
+                                TouchArea {
+                                    width: 120px;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.open-whatsapp(); }
+                                    Text { text: "Abrir WhatsApp ›"; color: #25d366; font-size: 13px; vertical-alignment: center; horizontal-alignment: right; }
+                                }
+                            }
+                            if root.wa-msgs.length == 0: Text {
+                                text: "Nenhuma mensagem nova.";
+                                color: root.ink.with-alpha(0.55);
+                                font-size: 13px;
+                            }
+                            for m in root.wa-msgs: Rectangle {
+                                height: 46px;
+                                border-radius: 12px;
+                                background: root.ink.with-alpha(0.07);
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    spacing: 10px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        horizontal-stretch: 1;
+                                        Text { text: m.sender; color: root.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+                                        Text { text: m.text; color: root.ink.with-alpha(0.75); font-size: 12px; overflow: elide; }
+                                    }
+                                    Text { text: m.time; color: root.ink.with-alpha(0.5); font-size: 11px; vertical-alignment: center; }
+                                }
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    // Página 4: configurações e apps do "abre".
+                    Rectangle {
+                        x: parent.width * 3 / 4;
+                        y: 0;
+                        width: parent.width / 4;
                         height: 380px;
                         HorizontalLayout {
                             padding: 20px;
@@ -1059,11 +1116,12 @@ export component Island inherits Window {
                 height: 8px;
                 alignment: center;
                 spacing: 8px;
-                for i in 3: Rectangle {
+                for i in 4: Rectangle {
                     width: root.page == i ? 18px : 7px;
                     height: 7px;
                     border-radius: 3.5px;
-                    background: root.page == i ? root.ink : root.ink.with-alpha(0.35);
+                    // A bolinha do WhatsApp fica verde quando há mensagem não lida.
+                    background: i == 2 && root.wa-unread > 0 && root.page != 2 ? #25d366 : root.page == i ? root.ink : root.ink.with-alpha(0.35);
                     animate width, background { duration: 250ms; }
                     TouchArea {
                         clicked => { root.go-page(i); }

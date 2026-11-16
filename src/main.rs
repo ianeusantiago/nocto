@@ -59,6 +59,8 @@ struct App {
     volume: volume::Volume,
     /// Conta os avisos para cada um fechar só a si mesmo.
     notify_serial: u64,
+    /// Últimas mensagens do WhatsApp, para a página delas.
+    wa_msgs: Vec<WaMsg>,
     /// Ícones dos apps já lidos (destino → ícone), para não reler a cada abertura.
     icons: RefCell<std::collections::HashMap<String, Option<slint::Image>>>,
 }
@@ -144,7 +146,7 @@ impl App {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
             CALENDAR if self.page == 0 => (680.0, 214.0, 40.0),
-            CALENDAR if self.page == 2 => (680.0, 380.0, 40.0),
+            CALENDAR if self.page == 3 => (680.0, 380.0, 40.0),
             NOTIFY => (440.0, 64.0, 32.0),
             CALENDAR => (680.0, 340.0, 40.0),
             DROP => (440.0, 128.0, 36.0),
@@ -193,11 +195,15 @@ impl App {
             return;
         }
         self.page = page;
+        self.ui.set_slide(true);
         self.ui.set_page(page);
         if page == 1 {
             self.refresh_calendar();
         }
         if page == 2 {
+            self.ui.set_wa_unread(0);
+        }
+        if page == 3 {
             self.refresh_settings();
         }
         self.layout();
@@ -207,14 +213,25 @@ impl App {
     /// Mensagem nova do WhatsApp: a ilha se expande por alguns segundos, como no iPhone.
     /// Não interrompe a barra, o painel nem um jogo em tela cheia.
     fn show_whatsapp(&mut self, texts: Vec<String>) {
-        if !self.config.whatsapp || self.fullscreen_app || self.hidden.get() {
-            return;
-        }
-        let mode = self.ui.get_mode();
-        if mode != PILL && mode != NOTIFY {
+        if !self.config.whatsapp {
             return;
         }
         let Some(msg) = nocto_core::notify::message_from(&texts, self.config.whatsapp_preview) else { return };
+        // Guarda na página de mensagens (as 5 mais novas no topo).
+        let now = win::local_time();
+        let time = format!("{:02}:{:02}", now.3, now.4);
+        let item = WaMsg { sender: msg.sender.clone().into(), text: msg.text.clone().into(), time: time.into() };
+        self.wa_msgs.insert(0, item);
+        self.wa_msgs.truncate(5);
+        self.ui.set_wa_msgs(ModelRc::new(VecModel::from(self.wa_msgs.clone())));
+        let mode = self.ui.get_mode();
+        if mode == CALENDAR && self.page == 2 {
+            return;
+        }
+        self.ui.set_wa_unread(self.ui.get_wa_unread() + 1);
+        if self.fullscreen_app || self.hidden.get() || (mode != PILL && mode != NOTIFY) {
+            return;
+        }
         self.ui.set_notify_sender(msg.sender.into());
         self.ui.set_notify_text(msg.text.into());
         self.set_mode(NOTIFY);
@@ -272,8 +289,9 @@ impl App {
 
     /// Mostra a página de configurações (abre o painel se estiver fechado).
     fn show_settings(&mut self) {
-        self.page = 2;
-        self.ui.set_page(2);
+        self.ui.set_slide(self.ui.get_mode() == CALENDAR);
+        self.page = 3;
+        self.ui.set_page(3);
         self.refresh_settings();
         if self.ui.get_mode() == CALENDAR {
             self.layout();
@@ -298,8 +316,12 @@ impl App {
 
     /// Abre o painel: na música se houver uma; senão, no calendário.
     fn open_panel(&mut self, page: i32) {
+        self.ui.set_slide(false);
         self.page = page;
         self.ui.set_page(page);
+        if page == 2 {
+            self.ui.set_wa_unread(0);
+        }
         self.ui.set_settings_note("".into());
         self.apply_theme();
         self.set_mode(CALENDAR);
@@ -632,7 +654,8 @@ fn wire_callbacks(ui: &Island) {
     ui.on_collapse(|| with_app(|app| app.close(false)));
     ui.on_expand(|| {
         with_app(|app| {
-            let page = if app.ui.get_has_track() { 0 } else { 1 };
+            // Mensagem não lida > música tocando > agenda.
+            let page = if app.ui.get_wa_unread() > 0 { 2 } else if app.ui.get_playing() { 0 } else { 1 };
             app.open_panel(page);
         })
     });
@@ -875,6 +898,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         pill_note: String::new(),
         volume: volume::Volume::new(),
         notify_serial: 0,
+        wa_msgs: Vec::new(),
         icons: RefCell::new(std::collections::HashMap::new()),
         config,
         dir,
