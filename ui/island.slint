@@ -286,6 +286,10 @@ export component Island inherits Window {
     in property <int> mode: 0;
     in property <color> glass: #0b2a44b3;
     in property <bool> solid;
+    // Miniatura da imagem solta (e do resultado, depois de converter / tirar o fundo).
+    in property <image> drop-preview;
+    in property <bool> has-drop-preview;
+    in property <string> drop-preview-label;
     in property <color> accent: #2bb4ff;
     in property <color> ink: #ffffff;
 
@@ -1290,8 +1294,47 @@ export component Island inherits Window {
                 }
                 reject
             }
-            VerticalLayout {
+            HorizontalLayout {
                 padding: 18px;
+                padding-right: 0;
+                spacing: 0;
+                // Miniatura, como no Explorador. Fundo xadrez para mostrar a transparência.
+                if root.has-drop-preview: VerticalLayout {
+                    spacing: 4px;
+                    width: 116px;
+                    Rectangle {
+                        width: 116px;
+                        height: 98px;
+                        border-radius: 12px;
+                        clip: true;
+                        background: #2a2f38;
+                        for cell in 48: Rectangle {
+                            x: mod(cell, 8) * 14.5px;
+                            y: floor(cell / 8) * 16.33px;
+                            width: 14.5px;
+                            height: 16.33px;
+                            background: mod(mod(cell, 8) + floor(cell / 8), 2) == 0 ? #3a404b : #2a2f38;
+                        }
+                        Image {
+                            width: parent.width;
+                            height: parent.height;
+                            source: root.drop-preview;
+                            image-fit: contain;
+                        }
+                        border-width: 1px;
+                        border-color: root.ink.with-alpha(0.15);
+                    }
+                    Text {
+                        text: root.drop-preview-label;
+                        color: root.ink.with-alpha(0.6);
+                        font-size: 10px;
+                        horizontal-alignment: center;
+                    }
+                }
+            VerticalLayout {
+                padding: 0;
+                padding-left: root.has-drop-preview ? 14px : 0;
+                padding-right: 18px;
                 spacing: 10px;
                 HorizontalLayout {
                     spacing: 10px;
@@ -1330,6 +1373,7 @@ export component Island inherits Window {
                     font-size: 12px;
                     overflow: elide;
                 }
+            }
             }
         }
     }

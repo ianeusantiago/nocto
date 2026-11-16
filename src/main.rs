@@ -183,6 +183,7 @@ impl App {
             CALENDAR if self.page == 3 => (680.0, 420.0, 40.0),
             NOTIFY => (440.0, 64.0, 32.0),
             CALENDAR => (680.0, 340.0, 40.0),
+            DROP if self.ui.get_has_drop_preview() => (580.0, 150.0, 40.0),
             DROP => (440.0, 128.0, 36.0),
             // Escondida: encolhe até um risquinho no topo antes de sumir (e cresce dele ao voltar).
             PILL if self.pill_hidden() => (90.0, 0.0, 0.0),
@@ -716,6 +717,25 @@ impl App {
         self.refresh_calendar();
     }
 
+    /// Miniatura de uma imagem na tela de soltar arquivo (lida fora da interface).
+    fn show_drop_preview(&self, path: &std::path::Path, label: &'static str) {
+        let path = path.to_path_buf();
+        std::thread::spawn(move || {
+            let Some((w, h, px)) = std::fs::read(&path).ok().and_then(|b| imgconv::decode_rgba(&b, 232)) else { return };
+            on_ui(move |app| {
+                let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&px, w, h);
+                app.ui.set_drop_preview(slint::Image::from_rgba8(buf));
+                app.ui.set_drop_preview_label(label.into());
+                if !app.ui.get_has_drop_preview() {
+                    app.ui.set_has_drop_preview(true);
+                    if app.ui.get_mode() == DROP {
+                        app.layout();
+                    }
+                }
+            });
+        });
+    }
+
     fn convert(&mut self, fmt: &str) {
         let Some(src) = self.dropped.clone() else { return };
         if fmt == "nobg" {
@@ -732,6 +752,7 @@ impl App {
                 on_ui(move |app| match result {
                     Ok(out) => {
                         let name = out.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        app.show_drop_preview(&out, "Resultado");
                         app.set_status(&format!("Salvo ao lado do original: {name}"), false);
                     }
                     Err(e) => app.set_status(&e, true),
@@ -750,6 +771,7 @@ impl App {
             on_ui(move |app| match result {
                 Ok(out) => {
                     let name = out.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    app.show_drop_preview(&out, "Resultado");
                     app.set_status(&format!("Salvo ao lado do original: {name}"), false);
                 }
                 Err(e) => app.set_status(&e, true),
@@ -977,6 +999,7 @@ fn wire_callbacks(ui: &Island) {
             WindowEvent::HoveredFile(_) => with_app(|app| {
                 if app.ui.get_mode() != DROP {
                     app.dropped = None;
+                    app.ui.set_has_drop_preview(false);
                     app.ui.set_drop_name("".into());
                     app.ui.set_status("".into());
                     app.set_mode(DROP);
@@ -987,6 +1010,7 @@ fn wire_callbacks(ui: &Island) {
                 with_app(move |app| {
                     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     app.ui.set_drop_name(name.into());
+                    app.show_drop_preview(&path, "Original");
                     app.dropped = Some(path);
                     app.ui.set_status("Converter para:".into());
                     app.ui.set_status_error(false);
@@ -1167,8 +1191,16 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         // Desenvolvimento: NOCTO_MODE=1|2|3 abre direto num modo, sem roubar o foco (para prints).
         if let Some(mode) = std::env::var("NOCTO_MODE").ok().and_then(|m| m.parse::<i32>().ok()) {
             if mode == DROP {
-                app.ui.set_drop_name("foto-perfil.png".into());
-                app.dropped = Some(PathBuf::from("foto-perfil.png"));
+                // NOCTO_FILE=caminho simula soltar esse arquivo (com miniatura).
+                let file = std::env::var("NOCTO_FILE").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("foto-perfil.png"));
+                let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                app.ui.set_drop_name(name.into());
+                app.show_drop_preview(&file, "Original");
+                app.dropped = Some(file);
+                // NOCTO_CONVERT=png|nobg… já clica na opção (para testar o resultado).
+                if let Ok(fmt) = std::env::var("NOCTO_CONVERT") {
+                    app.ui.invoke_convert(fmt.into());
+                }
             }
             if mode == BAR || mode == DROP {
                 app.ui.set_status(std::env::var("NOCTO_STATUS").unwrap_or_default().into());
