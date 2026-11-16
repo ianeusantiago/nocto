@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 /// Ouve uma frase e devolve o texto. `status` recebe avisos de progresso (download, ouvindo…).
 pub fn listen(
     data_dir: std::path::PathBuf,
+    apps: Vec<String>,
     status: impl Fn(&'static str) + Send + 'static,
     done: impl FnOnce(Result<String, String>) + Send + 'static,
 ) {
@@ -31,7 +32,13 @@ pub fn listen(
             let audio = record()?;
             status("Entendendo…");
             let engine = rx.recv().map_err(|_| "falha ao carregar a voz".to_string())??;
-            let text = engine.transcribe(&audio);
+            let picked = engine.transcribe(&audio, Some(&nocto_core::voicefix::grammar(&apps)));
+            let free = engine.transcribe(&audio, None);
+            let text = if picked.replace("[unk]", "").trim().is_empty() && free.is_empty() {
+                String::new()
+            } else {
+                nocto_core::voicefix::command(&picked, &free, &apps)
+            };
             if text.is_empty() { Err("Não entendi. Tente de novo, mais perto do microfone.".into()) } else { Ok(text) }
         })();
         done(result);
@@ -40,6 +47,7 @@ pub fn listen(
 
 type ModelNew = unsafe extern "C" fn(*const c_char) -> *mut c_void;
 type RecNew = unsafe extern "C" fn(*mut c_void, c_float) -> *mut c_void;
+type RecNewGrm = unsafe extern "C" fn(*mut c_void, c_float, *const c_char) -> *mut c_void;
 type Accept = unsafe extern "C" fn(*mut c_void, *const c_short, c_int) -> c_int;
 type Final = unsafe extern "C" fn(*mut c_void) -> *const c_char;
 type Free = unsafe extern "C" fn(*mut c_void);
@@ -72,18 +80,23 @@ impl Engine {
         }
     }
 
-    /// Áudio 16 kHz mono → texto em minúsculas.
-    pub fn transcribe(&self, audio: &[i16]) -> String {
+    /// Áudio 16 kHz mono → texto. Com `grammar` (lista JSON de frases), só escolhe entre elas.
+    pub fn transcribe(&self, audio: &[i16], grammar: Option<&str>) -> String {
         unsafe {
-            let (Ok(new), Ok(accept), Ok(fin), Ok(free)) = (
+            let (Ok(new), Ok(new_grm), Ok(accept), Ok(fin), Ok(free)) = (
                 self.lib.get::<RecNew>(b"vosk_recognizer_new"),
+                self.lib.get::<RecNewGrm>(b"vosk_recognizer_new_grm"),
                 self.lib.get::<Accept>(b"vosk_recognizer_accept_waveform_s"),
                 self.lib.get::<Final>(b"vosk_recognizer_final_result"),
                 self.lib.get::<Free>(b"vosk_recognizer_free"),
             ) else {
                 return String::new();
             };
-            let rec = new(self.model, 16000.0);
+            let grm = grammar.and_then(|g| CString::new(g).ok());
+            let rec = match &grm {
+                Some(g) => new_grm(self.model, 16000.0, g.as_ptr()),
+                None => new(self.model, 16000.0),
+            };
             if rec.is_null() {
                 return String::new();
             }

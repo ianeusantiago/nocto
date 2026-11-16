@@ -790,17 +790,16 @@ fn wire_callbacks(ui: &Island) {
             app.ui.set_listening(true);
             app.set_status("", false);
             let dir = app.dir.clone();
+            let apps: Vec<String> = app.allow.names().map(|n| n.to_string()).collect();
             voice::listen(
                 dir,
+                apps,
                 |msg| on_ui(move |app| app.set_status(msg, false)),
                 |result| {
                     on_ui(move |app| {
                         app.ui.set_listening(false);
                         match result {
-                            Ok(text) => {
-                                let names: Vec<String> = app.allow.names().map(|n| n.to_string()).collect();
-                                app.submit(&nocto_core::voicefix::fix(&text, &names))
-                            }
+                            Ok(text) => app.submit(&text),
                             Err(e) => app.set_status(&e, true),
                         }
                     })
