@@ -21,7 +21,7 @@ Uma "Dynamic Island" para Windows, escrita em Rust. Uma ilha no estilo Dynamic I
 | **Tema por horário** | Azul-céu das 05h às 16h, laranja até as 18h, azul-noite depois. Troca com fade. O botão no calendário fixa um tema. |
 | **Modo jogo** | Se o app da frente está em tela cheia, a pílula some sozinha. O atalho continua valendo. |
 | **Mensagens** | WhatsApp e e-mail (Outlook, ou Gmail avisando pelo navegador) chegam pelas notificações do Windows: a ilha expande por 5 s e a página Mensagens guarda as últimas, com abas WhatsApp | E-mail. Nas Configurações dá para desligar ou esconder o texto. |
-| **Voz** | Botão de microfone na barra: clique e fale o comando ("toca only day", "abre brave"). Usa o reconhecimento de fala do Windows (grátis); precisa de "Reconhecimento de fala online" ligado em Configurações › Privacidade › Fala. |
+| **Voz** | Botão de microfone na barra: clique e fale o comando ("abre brave", "pausa", "agenda"). 100% offline e grátis (Vosk, modelo em português de ~50 MB baixado no primeiro uso). Nomes em inglês às vezes saem errados. |
 
 ## Configuração
 

@@ -789,21 +789,23 @@ fn wire_callbacks(ui: &Island) {
             }
             app.ui.set_listening(true);
             app.set_status("", false);
-            voice::listen(|result| {
-                on_ui(move |app| {
-                    app.ui.set_listening(false);
-                    match result {
-                        Ok(text) => app.submit(&text.to_lowercase()),
-                        Err(e) => {
-                            // Falta só ligar uma opção do Windows: já abre a tela certa.
-                            if e.contains("fala online") {
-                                let _ = nocto_core::launcher::open_url("ms-settings:privacy-speech");
+            let dir = app.dir.clone();
+            voice::listen(
+                dir,
+                |msg| on_ui(move |app| app.set_status(msg, false)),
+                |result| {
+                    on_ui(move |app| {
+                        app.ui.set_listening(false);
+                        match result {
+                            Ok(text) => {
+                                let names: Vec<String> = app.allow.names().map(|n| n.to_string()).collect();
+                                app.submit(&nocto_core::voicefix::fix(&text, &names))
                             }
-                            app.set_status(&e, true)
+                            Err(e) => app.set_status(&e, true),
                         }
-                    }
-                })
-            });
+                    })
+                },
+            );
         })
     });
     ui.on_open_notified(|| with_app(|app| app.open_messages_app(app.notify_source != Source::WhatsApp)));

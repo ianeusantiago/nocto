@@ -2,6 +2,8 @@ pub mod calendar;
 pub mod commands;
 pub mod bgremove;
 pub mod imgconv;
+pub mod voicefix;
+pub mod voskdl;
 pub mod launcher;
 pub mod theme;
 pub mod spotify;
