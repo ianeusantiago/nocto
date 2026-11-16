@@ -359,6 +359,8 @@ export component Island inherits Window {
     callback toggle-fullscreen();
     callback cycle-hotkey();
     callback open-notified();
+    callback voice();
+    in property <bool> listening;
     callback open-messages(bool);
     callback msg-tab-changed();
     callback toggle-whatsapp();
@@ -558,7 +560,7 @@ export component Island inherits Window {
                             x: 0;
                             width: parent.width;
                             visible: input.text == "";
-                            text: "abre spotify · toca <música> · agenda · pausa";
+                            text: root.listening ? "Ouvindo… fale o comando" : "abre spotify · toca <música> · agenda · pausa";
                             color: root.ink.with-alpha(0.4);
                             font-size: 17px;
                             vertical-alignment: center;
@@ -572,6 +574,41 @@ export component Island inherits Window {
                             vertical-alignment: center;
                             single-line: true;
                             accepted => { root.submit(self.text); }
+                        }
+                    }
+                    // Microfone: clique e fale o comando ("toca only day", "abre brave"…).
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 16px;
+                        background: root.listening ? root.accent : root.ink.with-alpha(mic.has-hover ? 0.16 : 0.08);
+                        animate background { duration: 200ms; }
+                        // Anel pulsando enquanto ouve.
+                        if root.listening: Rectangle {
+                            property <float> t: mod(animation-tick() / 1100ms, 1);
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: parent.width * (1 + 0.6 * self.t);
+                            height: self.width;
+                            border-radius: self.width / 2;
+                            border-width: 2px;
+                            border-color: root.accent.with-alpha(1 - self.t);
+                        }
+                        Path {
+                            x: 9px;
+                            y: 7px;
+                            width: 14px;
+                            height: 18px;
+                            viewbox-width: 14;
+                            viewbox-height: 18;
+                            stroke: root.listening ? #ffffff : root.ink.with-alpha(0.8);
+                            stroke-width: 1.6px;
+                            commands: "M4.5 3.5 A2.5 2.5 0 0 1 9.5 3.5 V8.5 A2.5 2.5 0 0 1 4.5 8.5 Z M1.5 8 A5.5 5.5 0 0 0 12.5 8 M7 13.5 V17 M4 17 H10";
+                        }
+                        mic := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.voice(); }
                         }
                     }
                 }

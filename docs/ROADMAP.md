@@ -12,7 +12,7 @@ Tudo gratuito, sem serviço pago. Ordem definida pelo autor: **A, D, E, B, C**, 
 | F ✅ | **Notificações do WhatsApp** | Página/aviso na ilha quando chega mensagem. | Lê as notificações do app WhatsApp do Windows (API de notificações do Windows); grátis. Pede permissão de acesso às notificações uma vez. |
 | G ✅ | **Remover fundo de imagem** | Botão a mais ao soltar uma imagem. | Modelo de IA baixado só no primeiro uso. |
 | H ✅ | **E-mail** | Página com e-mails não lidos do Gmail. | Login com o Google uma vez. |
-| I | **Comando por voz** | Falar com a barra em vez de digitar. | Reconhecimento de fala local (grátis, mais pesado). |
+| I ✅ | **Comando por voz** | Falar com a barra em vez de digitar. | Reconhecimento de fala local (grátis, mais pesado). |
 | J | **Medir FPS em jogo** | Com e sem o Nocto, três execuções. | Prioridade de leveza ainda sem número. |
 | K | **Testar em PC fraco / Windows 10** | Notebook do amigo. | |
 | L | **Testar arrastar arquivo de verdade** | Converter imagem soltando na ilha. | Nunca testado com arraste real. |

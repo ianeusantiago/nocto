@@ -3,6 +3,7 @@
 mod glass;
 mod media;
 mod notify;
+mod voice;
 mod volume;
 mod win;
 
@@ -781,6 +782,30 @@ fn wire_callbacks(ui: &Island) {
             app.foreground_changed(win::foreground());
         })
     });
+    ui.on_voice(|| {
+        with_app(|app| {
+            if app.ui.get_listening() {
+                return;
+            }
+            app.ui.set_listening(true);
+            app.set_status("", false);
+            voice::listen(|result| {
+                on_ui(move |app| {
+                    app.ui.set_listening(false);
+                    match result {
+                        Ok(text) => app.submit(&text.to_lowercase()),
+                        Err(e) => {
+                            // Falta só ligar uma opção do Windows: já abre a tela certa.
+                            if e.contains("fala online") {
+                                let _ = nocto_core::launcher::open_url("ms-settings:privacy-speech");
+                            }
+                            app.set_status(&e, true)
+                        }
+                    }
+                })
+            });
+        })
+    });
     ui.on_open_notified(|| with_app(|app| app.open_messages_app(app.notify_source != Source::WhatsApp)));
     ui.on_open_messages(|mail| with_app(move |app| app.open_messages_app(mail)));
     ui.on_msg_tab_changed(|| with_app(|app| app.mark_read()));
@@ -1048,6 +1073,10 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
                     }
                 })
             });
+        }
+        // Desenvolvimento: NOCTO_VOICE começa a ouvir logo ao abrir (com NOCTO_MODE=1).
+        if std::env::var_os("NOCTO_VOICE").is_some() {
+            app.ui.invoke_voice();
         }
         // Desenvolvimento: NOCTO_PLAYING simula música tocando na pílula.
         if std::env::var_os("NOCTO_PLAYING").is_some() {
