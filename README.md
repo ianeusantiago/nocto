@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="128" alt="Nocto"></p>
+
 # Nocto
 
 Uma "Dynamic Island" para Windows, escrita em Rust. Uma ilha no estilo Dynamic Island, colada no topo da tela, com material de vidro inspirado no Liquid Glass, que vira barra de comando, calendário e conversor de imagens, e fica leve o bastante para não ser notada nem em jogo.

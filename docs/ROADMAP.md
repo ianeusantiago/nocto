@@ -16,4 +16,4 @@ Tudo gratuito, sem serviço pago. Ordem definida pelo autor: **A, D, E, B, C**, 
 | J | **Medir FPS em jogo** | Com e sem o Nocto, três execuções. | Prioridade de leveza ainda sem número. |
 | K | **Testar em PC fraco / Windows 10** | Notebook do amigo. | |
 | L | **Testar arrastar arquivo de verdade** | Converter imagem soltando na ilha. | Nunca testado com arraste real. |
-| M | **Logo do Nocto** | Ícone do app, do executável e do README. | Uma das últimas. |
+| M ✅ | **Logo do Nocto** | Ícone do app, do executável e do README. | Uma das últimas. |
