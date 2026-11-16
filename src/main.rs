@@ -133,7 +133,7 @@ impl App {
             self.covered = covered;
             self.peek = peek;
             if self.ui.get_mode() == PILL {
-                self.visible(!self.pill_hidden());
+                self.layout();
             }
         }
     }
@@ -173,6 +173,8 @@ impl App {
             NOTIFY => (440.0, 64.0, 32.0),
             CALENDAR => (680.0, 340.0, 40.0),
             DROP => (440.0, 128.0, 36.0),
+            // Escondida: encolhe até um risquinho no topo antes de sumir (e cresce dele ao voltar).
+            PILL if self.pill_hidden() => (90.0, 8.0, 4.0),
             _ if ui.get_show_music() => (360.0, 38.0, 19.0),
             _ => (230.0, 34.0, 17.0),
         }
@@ -200,7 +202,20 @@ impl App {
                 }
             })
         });
-        self.visible(!(self.ui.get_mode() == PILL && self.pill_hidden()));
+        if self.ui.get_mode() == PILL && self.pill_hidden() {
+            // Deixa a animação de encolher terminar antes de esconder.
+            if !self.hidden.get() {
+                slint::Timer::single_shot(Duration::from_millis(glass::MORPH_MS as u64), || {
+                    with_app(|app| {
+                        if app.ui.get_mode() == PILL && app.pill_hidden() {
+                            app.visible(false);
+                        }
+                    })
+                });
+            }
+        } else {
+            self.visible(true);
+        }
     }
 
     fn set_mode(&mut self, mode: i32) {
@@ -260,7 +275,7 @@ impl App {
         self.set_mode(NOTIFY);
         self.notify_serial += 1;
         let serial = self.notify_serial;
-        slint::Timer::single_shot(Duration::from_secs(6), move || {
+        slint::Timer::single_shot(Duration::from_secs(5), move || {
             with_app(move |app| {
                 if app.ui.get_mode() == NOTIFY && app.notify_serial == serial {
                     app.set_mode(PILL);
@@ -646,7 +661,7 @@ impl App {
         if full != self.fullscreen_app {
             self.fullscreen_app = full;
             if self.ui.get_mode() == PILL {
-                self.visible(!self.pill_hidden());
+                self.layout();
             }
         }
         self.apply_theme();
