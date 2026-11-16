@@ -839,6 +839,17 @@ fn wire_callbacks(ui: &Island) {
                             Ok(text) => app.submit(&text),
                             Err(e) => app.set_status(&e, true),
                         }
+                        // Sem foco (chamada por voz), a barra não fecharia sozinha: fecha em 5 s
+                        // se ninguém mexer nela.
+                        if app.ui.get_mode() == BAR && win::foreground() != app.hwnd {
+                            slint::Timer::single_shot(Duration::from_secs(5), || {
+                                with_app(|app| {
+                                    if app.ui.get_mode() == BAR && !app.ui.get_listening() && win::foreground() != app.hwnd {
+                                        app.close(false);
+                                    }
+                                })
+                            });
+                        }
                     })
                 },
             );
@@ -996,7 +1007,9 @@ fn wire_callbacks(ui: &Island) {
                     app.force_repaint();
                     if lost_focus {
                         let mode = app.ui.get_mode();
-                        if mode == BAR || mode == CALENDAR {
+                        // Ouvindo um comando de voz: a barra fica aberta mesmo sem foco
+                        // (chamada pelo "Nocto", ela nem chega a ganhar o foco).
+                        if (mode == BAR || mode == CALENDAR) && !app.ui.get_listening() {
                             app.close(false);
                         }
                     }
