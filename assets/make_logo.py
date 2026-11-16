@@ -79,7 +79,7 @@ for (x, y, r) in ():
 band = ImageChops.subtract(moon.filter(ImageFilter.MinFilter(9)), moon.filter(ImageFilter.MinFilter(61))).filter(ImageFilter.GaussianBlur(14))
 glow = Image.new("RGBA", (S, S), (210, 235, 255, 0)); glow.putalpha(band.point(lambda v: int(v * 0.45)))
 icon.alpha_composite(glow)
-icon.save(f"{OUT}/logo.png")
+icon.save(f"{OUT}/logo-lua.png")
 
 sheet = Image.new("RGBA", (560, 420), (240, 240, 240, 255))
 sheet.alpha_composite(icon.resize((300, 300), Image.LANCZOS), (20, 20))

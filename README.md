@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" width="140" alt="Logo do Nocto">
+  <img src="assets/logo-lua.png" width="140" alt="Logo do Nocto">
 </p>
 
 <h1 align="center">Nocto</h1>
