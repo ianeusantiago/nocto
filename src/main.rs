@@ -174,7 +174,7 @@ impl App {
             CALENDAR => (680.0, 340.0, 40.0),
             DROP => (440.0, 128.0, 36.0),
             // Escondida: encolhe até um risquinho no topo antes de sumir (e cresce dele ao voltar).
-            PILL if self.pill_hidden() => (90.0, 8.0, 4.0),
+            PILL if self.pill_hidden() => (90.0, 0.0, 0.0),
             _ if ui.get_show_music() => (360.0, 38.0, 19.0),
             _ => (230.0, 34.0, 17.0),
         }
