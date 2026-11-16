@@ -22,6 +22,7 @@ Uma "Dynamic Island" para Windows, escrita em Rust. Uma ilha no estilo Dynamic I
 | **Modo jogo** | Se o app da frente está em tela cheia, a pílula some sozinha. O atalho continua valendo. |
 | **Mensagens** | WhatsApp e e-mail (Outlook, ou Gmail avisando pelo navegador) chegam pelas notificações do Windows: a ilha expande por 5 s e a página Mensagens guarda as últimas, com abas WhatsApp | E-mail. Nas Configurações dá para desligar ou esconder o texto. |
 | **Voz** | Botão de microfone na barra: clique e fale o comando ("abre brave", "pausa", "agenda"). 100% offline e grátis (Vosk, modelo em português de ~50 MB baixado no primeiro uso). Nomes em inglês às vezes saem errados. |
+| **"Nocto"** | Opcional (Configurações › Chamar dizendo "Nocto"): dizer o nome abre a barra e já ouve o comando. Microfone fica ligado; custa ~+90 MB de RAM e quase nada de CPU em silêncio; pausa em jogo de tela cheia. |
 
 ## Configuração
 

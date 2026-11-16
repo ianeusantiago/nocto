@@ -98,6 +98,8 @@ pub struct Config {
     pub whatsapp: bool,
     /// Mostrar o texto das mensagens (desligado: só "Nova mensagem").
     pub whatsapp_preview: bool,
+    /// Dizer "Nocto" abre a barra e começa a ouvir (microfone sempre ligado; desligado por padrão).
+    pub wake_word: bool,
 }
 
 impl Default for Config {
@@ -110,6 +112,7 @@ impl Default for Config {
             compact: CompactMode::Auto,
             whatsapp: true,
             whatsapp_preview: true,
+            wake_word: false,
         }
     }
 }

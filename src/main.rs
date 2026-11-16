@@ -4,6 +4,7 @@ mod glass;
 mod media;
 mod notify;
 mod voice;
+mod wake;
 mod volume;
 mod win;
 
@@ -64,6 +65,9 @@ struct App {
     volume: volume::Volume,
     /// Conta os avisos para cada um fechar só a si mesmo.
     notify_serial: u64,
+    /// Escuta do "Nocto" (None = desligada).
+    wake: Option<wake::Wake>,
+    wake_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Últimas mensagens do WhatsApp, para a página delas.
     wa_msgs: Vec<WaMsg>,
     mail_msgs: Vec<WaMsg>,
@@ -76,7 +80,7 @@ struct App {
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
 const WINDOW_W: f32 = 720.0;
-const WINDOW_H: f32 = 400.0;
+const WINDOW_H: f32 = 440.0;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -175,7 +179,7 @@ impl App {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
             CALENDAR if self.page == 0 => (680.0, 214.0, 40.0),
-            CALENDAR if self.page == 3 => (680.0, 380.0, 40.0),
+            CALENDAR if self.page == 3 => (680.0, 420.0, 40.0),
             NOTIFY => (440.0, 64.0, 32.0),
             CALENDAR => (680.0, 340.0, 40.0),
             DROP => (440.0, 128.0, 36.0),
@@ -346,6 +350,7 @@ impl App {
         self.ui.set_hotkey_label(self.config.hotkey.replace('+', " + ").into());
         self.ui.set_whatsapp_on(self.config.whatsapp);
         self.ui.set_whatsapp_preview(self.config.whatsapp_preview);
+        self.ui.set_wake_on(self.config.wake_word);
     }
 
     /// Ícone do app (do .exe ou atalho), lido uma vez e guardado.
@@ -503,6 +508,35 @@ impl App {
         self.ui.set_accent(color(p.accent));
         self.ui.set_ink(color(p.text));
         self.ui.set_theme_label(self.config.theme.label().into());
+    }
+
+    /// Liga/desliga a escuta do "Nocto" conforme a configuração.
+    fn apply_wake(&mut self) {
+        if !self.config.wake_word {
+            self.wake = None; // solta o microfone e o modelo
+            return;
+        }
+        if self.wake.is_none() {
+            let paused = self.wake_paused.clone();
+            self.wake = Some(wake::start(self.dir.clone(), paused, || {
+                on_ui(|app| {
+                    if app.ui.get_listening() || app.fullscreen_app {
+                        return;
+                    }
+                    if app.ui.get_mode() != BAR {
+                        app.toggle_bar();
+                    }
+                    app.ui.invoke_voice();
+                })
+            }));
+        }
+        self.update_wake_pause();
+    }
+
+    /// Escuta do "Nocto" pausa em jogo de tela cheia e enquanto já está ouvindo um comando.
+    fn update_wake_pause(&self) {
+        let paused = self.fullscreen_app || self.ui.get_listening();
+        self.wake_paused.store(paused, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn toggle_bar(&mut self) {
@@ -726,6 +760,7 @@ impl App {
         let full = self.config.hide_in_fullscreen && win::is_fullscreen(fg);
         if full != self.fullscreen_app {
             self.fullscreen_app = full;
+            self.update_wake_pause();
             if self.ui.get_mode() == PILL {
                 self.layout();
             }
@@ -788,6 +823,7 @@ fn wire_callbacks(ui: &Island) {
                 return;
             }
             app.ui.set_listening(true);
+            app.update_wake_pause();
             app.set_status("", false);
             let dir = app.dir.clone();
             let apps: Vec<String> = app.allow.names().map(|n| n.to_string()).collect();
@@ -798,6 +834,7 @@ fn wire_callbacks(ui: &Island) {
                 |result| {
                     on_ui(move |app| {
                         app.ui.set_listening(false);
+                        app.update_wake_pause();
                         match result {
                             Ok(text) => app.submit(&text),
                             Err(e) => app.set_status(&e, true),
@@ -815,6 +852,14 @@ fn wire_callbacks(ui: &Island) {
             app.config.whatsapp = !app.config.whatsapp;
             let _ = app.config.save(&app.dir.join("config.json"));
             app.refresh_settings();
+        })
+    });
+    ui.on_toggle_wake(|| {
+        with_app(|app| {
+            app.config.wake_word = !app.config.wake_word;
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.refresh_settings();
+            app.apply_wake();
         })
     });
     ui.on_toggle_whatsapp_preview(|| {
@@ -1028,6 +1073,8 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         pill_note: String::new(),
         volume: volume::Volume::new(),
         notify_serial: 0,
+        wake: None,
+        wake_paused: Default::default(),
         wa_msgs: Vec::new(),
         mail_msgs: Vec::new(),
         mail_source: Source::Email { web: true },
@@ -1163,6 +1210,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
 
     // Mensagens do WhatsApp, pelas notificações do Windows.
     notify::watch(|source, texts| on_ui(move |app| app.show_message(source, texts)));
+    with_app(|app| app.apply_wake());
 
     // Troca de tema: uma thread que dorme até a próxima virada (05h, 16h, 18h).
     std::thread::spawn(|| loop {

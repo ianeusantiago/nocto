@@ -126,6 +126,12 @@ impl Drop for Engine {
 /// Grava do microfone padrão até 0,9 s de silêncio depois da fala (máx. 8 s;
 /// desiste se ninguém falar em 5 s). Devolve 16 kHz mono.
 fn record() -> Result<Vec<i16>, String> {
+    let (stream, rx, rate, channels) = open_mic()?;
+    record_from(stream, rx, rate, channels)
+}
+
+/// Microfone padrão ligado: blocos de amostras (intercaladas por canal), taxa e nº de canais.
+pub fn open_mic() -> Result<(cpal::Stream, mpsc::Receiver<Vec<f32>>, usize, usize), String> {
     let host = cpal::default_host();
     let device = host.default_input_device().ok_or("Nenhum microfone encontrado.")?;
     let config = device.default_input_config().map_err(|e| format!("microfone: {e}"))?;
@@ -147,7 +153,10 @@ fn record() -> Result<Vec<i16>, String> {
     }
     .map_err(|e| format!("microfone: {e}"))?;
     stream.play().map_err(|e| format!("microfone: {e}"))?;
+    Ok((stream, rx, rate, channels))
+}
 
+fn record_from(stream: cpal::Stream, rx: mpsc::Receiver<Vec<f32>>, rate: usize, channels: usize) -> Result<Vec<i16>, String> {
     let start = Instant::now();
     let mut mono: Vec<f32> = Vec::new();
     let mut heard = false;
