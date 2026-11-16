@@ -290,6 +290,7 @@ export component Island inherits Window {
     in property <image> drop-preview;
     in property <bool> has-drop-preview;
     in property <string> drop-preview-label;
+    callback open-preview();
     in property <color> accent: #2bb4ff;
     in property <color> ink: #ffffff;
 
@@ -1321,11 +1322,16 @@ export component Island inherits Window {
                             source: root.drop-preview;
                             image-fit: contain;
                         }
-                        border-width: 1px;
-                        border-color: root.ink.with-alpha(0.15);
+                        // Clique: mostra o arquivo no Explorador.
+                        preview-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.open-preview(); }
+                        }
+                        border-width: preview-touch.has-hover ? 2px : 1px;
+                        border-color: preview-touch.has-hover ? root.accent : root.ink.with-alpha(0.15);
                     }
                     Text {
-                        text: root.drop-preview-label;
+                        text: root.drop-preview-label + " · abrir";
                         color: root.ink.with-alpha(0.6);
                         font-size: 10px;
                         horizontal-alignment: center;

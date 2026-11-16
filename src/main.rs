@@ -70,6 +70,8 @@ struct App {
     wake_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Últimas mensagens do WhatsApp, para a página delas.
     wa_msgs: Vec<WaMsg>,
+    /// Arquivo cuja miniatura está na tela de soltar (clique abre no Explorador).
+    preview_path: std::cell::RefCell<Option<PathBuf>>,
     mail_msgs: Vec<WaMsg>,
     /// De onde veio o último e-mail e o último aviso (para saber o que abrir no clique).
     mail_source: Source,
@@ -720,6 +722,7 @@ impl App {
     /// Miniatura de uma imagem na tela de soltar arquivo (lida fora da interface).
     fn show_drop_preview(&self, path: &std::path::Path, label: &'static str) {
         let path = path.to_path_buf();
+        self.preview_path.replace(Some(path.clone()));
         std::thread::spawn(move || {
             let Some((w, h, px)) = std::fs::read(&path).ok().and_then(|b| imgconv::decode_rgba(&b, 232)) else { return };
             on_ui(move |app| {
@@ -876,6 +879,15 @@ fn wire_callbacks(ui: &Island) {
                     })
                 },
             );
+        })
+    });
+    ui.on_open_preview(|| {
+        with_app(|app| {
+            if let Some(path) = app.preview_path.borrow().clone() {
+                // "/select," abre a pasta já com o arquivo selecionado.
+                use std::os::windows::process::CommandExt;
+                let _ = std::process::Command::new("explorer.exe").raw_arg(format!("/select,\"{}\"", path.display())).spawn();
+            }
         })
     });
     ui.on_open_notified(|| with_app(|app| app.open_messages_app(app.notify_source != Source::WhatsApp)));
@@ -1115,6 +1127,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         wake: None,
         wake_paused: Default::default(),
         wa_msgs: Vec::new(),
+        preview_path: Default::default(),
         mail_msgs: Vec::new(),
         mail_source: Source::Email { web: true },
         notify_source: Source::WhatsApp,
