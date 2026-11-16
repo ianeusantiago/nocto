@@ -153,6 +153,46 @@ pub fn show(raw: isize, visible: bool) {
     }
 }
 
+/// A janela da frente cobre o topo do meio da tela (onde fica a pílula)?
+/// Ex.: navegador maximizado, com as abas embaixo da pílula.
+pub fn covers_top(raw: isize) -> bool {
+    unsafe {
+        let fg = h(raw);
+        if fg.is_invalid() || fg == GetShellWindow() || fg == GetDesktopWindow() || IsIconic(fg).as_bool() {
+            return false;
+        }
+        let mut class = [0u16; 32];
+        let n = GetClassNameW(fg, &mut class) as usize;
+        let class = String::from_utf16_lossy(&class[..n]);
+        if class == "WorkerW" || class == "Progman" || class == "Shell_TrayWnd" {
+            return false;
+        }
+        let ex = GetWindowLongPtrW(fg, GWL_EXSTYLE);
+        if ex & WS_EX_TOOLWINDOW.0 as isize != 0 || is_capture_tool(fg) {
+            return false;
+        }
+        let mut r = RECT::default();
+        if GetWindowRect(fg, &mut r).is_err() {
+            return false;
+        }
+        let mid = GetSystemMetrics(SM_CXSCREEN) / 2;
+        r.top <= 40 && r.bottom > 40 && r.left < mid + 180 && r.right > mid - 180
+    }
+}
+
+/// O mouse está encostado no topo, no meio da tela (para espiar a pílula escondida)?
+/// `reach` é a altura da faixa que conta, em pixels.
+pub fn cursor_at_top(reach: i32) -> bool {
+    unsafe {
+        let mut p = POINT::default();
+        if GetCursorPos(&mut p).is_err() {
+            return false;
+        }
+        let mid = GetSystemMetrics(SM_CXSCREEN) / 2;
+        p.y <= reach && (p.x - mid).abs() < 220
+    }
+}
+
 pub fn foreground() -> isize {
     unsafe { GetForegroundWindow().0 as isize }
 }

@@ -45,6 +45,9 @@ struct App {
     dropped: Option<PathBuf>,
     /// Um app em tela cheia (ex.: jogo) está na frente: a pílula some.
     fullscreen_app: bool,
+    /// Uma janela cobre o topo da tela, e o mouse está ou não espiando a pílula.
+    covered: bool,
+    peek: bool,
     glass: Option<glass::Glass>,
     last_shape: std::cell::Cell<(f32, f32)>,
     region_spec: std::cell::Cell<(f32, f32, f32, f32)>,
@@ -115,6 +118,26 @@ impl App {
     /// Some/aparece sem esconder as janelas: esconder (ShowWindow) fazia o Windows
     /// descartar o desenho da interface, que voltava vazia (só o vidro) ou com manchas.
     /// Aqui a área visível vira vazia e o desenho continua intacto.
+    /// A pílula some em jogo de tela cheia e quando uma janela cobre o topo
+    /// (navegador maximizado). Encostar o mouse no topo mostra de novo.
+    fn pill_hidden(&self) -> bool {
+        self.fullscreen_app || (self.covered && !self.peek)
+    }
+
+    /// Confere a janela da frente e o mouse (a cada 0,5 s; custa quase nada).
+    fn check_cover(&mut self) {
+        let covered = win::covers_top(win::foreground());
+        // Já espiando: continua enquanto o mouse estiver sobre a pílula.
+        let peek = covered && win::cursor_at_top(if self.peek { 60 } else { 2 });
+        if (covered, peek) != (self.covered, self.peek) {
+            self.covered = covered;
+            self.peek = peek;
+            if self.ui.get_mode() == PILL {
+                self.visible(!self.pill_hidden());
+            }
+        }
+    }
+
     fn visible(&self, visible: bool) {
         if self.hidden.replace(!visible) != !visible {
             self.apply_region();
@@ -177,7 +200,7 @@ impl App {
                 }
             })
         });
-        self.visible(!(self.ui.get_mode() == PILL && self.fullscreen_app));
+        self.visible(!(self.ui.get_mode() == PILL && self.pill_hidden()));
     }
 
     fn set_mode(&mut self, mode: i32) {
@@ -229,7 +252,7 @@ impl App {
             return;
         }
         self.ui.set_wa_unread(self.ui.get_wa_unread() + 1);
-        if self.fullscreen_app || self.hidden.get() || (mode != PILL && mode != NOTIFY) {
+        if self.fullscreen_app || (mode != PILL && mode != NOTIFY) {
             return;
         }
         self.ui.set_notify_sender(msg.sender.into());
@@ -623,7 +646,7 @@ impl App {
         if full != self.fullscreen_app {
             self.fullscreen_app = full;
             if self.ui.get_mode() == PILL {
-                self.visible(!full);
+                self.visible(!self.pill_hidden());
             }
         }
         self.apply_theme();
@@ -888,6 +911,8 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         prev_foreground: 0,
         dropped: None,
         fullscreen_app: false,
+        covered: false,
+        peek: false,
         glass,
         last_shape: std::cell::Cell::new((0.0, 0.0)),
         region_spec: std::cell::Cell::new((0.0, 0.0, 0.0, 0.0)),
@@ -1028,4 +1053,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
 
     // Esconde a pílula quando um app em tela cheia (jogo, vídeo) vem para a frente.
     win::watch_foreground(|fg| with_app(move |app| app.foreground_changed(fg)));
+    let cover_timer = slint::Timer::default();
+    cover_timer.start(slint::TimerMode::Repeated, Duration::from_millis(500), || with_app(|app| app.check_cover()));
+    std::mem::forget(cover_timer);
 }
