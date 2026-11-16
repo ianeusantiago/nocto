@@ -21,14 +21,13 @@ icon.alpha_composite(aura.filter(ImageFilter.GaussianBlur(120)))
 # Máscara da lua crescente.
 moon = Image.new("L", (S, S), 0)
 md = ImageDraw.Draw(moon)
-md.ellipse((215, 167, 899, 851), fill=255)
-md.ellipse((415, 67, 1055, 707), fill=0)
+md.ellipse((122, 122, 902, 902), fill=255)
 moon = moon.filter(ImageFilter.GaussianBlur(1.5))
 
 # Liquid Glass: o fundo desfocado e clareado dentro da lua (cinza claro translúcido)…
 blurred = icon.filter(ImageFilter.GaussianBlur(28))
 frost = Image.new("RGBA", (S, S), (225, 230, 238, 255))
-glass = Image.blend(blurred, frost, 0.5)
+glass = Image.blend(blurred, frost, 0.32)
 # …brilho de cima para baixo (mais claro no alto)…
 sheen = vgrad((255, 255, 255, 120), (255, 255, 255, 0))
 glass.alpha_composite(sheen)
@@ -46,7 +45,7 @@ icon.alpha_composite(shadow)
 icon.paste(glass, (0, 0), moon)
 
 # Borda de luz (rim) do vidro: fina, mais forte no alto à esquerda.
-edge = ImageChops.subtract(moon, moon.filter(ImageFilter.MinFilter(11)))
+edge = ImageChops.subtract(moon, moon.filter(ImageFilter.MinFilter(15)))
 rim = vgrad((255, 255, 255, 255), (255, 255, 255, 90))
 rl = Image.new("RGBA", (S, S), (0, 0, 0, 0))
 rl.paste(rim, (0, 0), edge)
@@ -54,8 +53,8 @@ icon.alpha_composite(rl)
 
 # Reflexo especular no alto da lua.
 spec = Image.new("L", (S, S), 0)
-ImageDraw.Draw(spec).ellipse((275, 277, 475, 417), fill=190)
-ImageDraw.Draw(spec).ellipse((605, 717, 745, 777), fill=110)
+ImageDraw.Draw(spec).ellipse((230, 200, 520, 380), fill=200)
+ImageDraw.Draw(spec).arc((170, 170, 854, 854), 30, 150, fill=170, width=34)
 spec = ImageChops.multiply(spec.filter(ImageFilter.GaussianBlur(30)), moon)
 sl = Image.new("RGBA", (S, S), (255, 255, 255, 0))
 sl.putalpha(spec)
@@ -63,9 +62,24 @@ icon.alpha_composite(sl)
 
 # Cantos arredondados do ícone.
 mask = Image.new("L", (S, S), 0)
-ImageDraw.Draw(mask).rounded_rectangle((0, 0, S - 1, S - 1), 230, fill=255)
+ImageDraw.Draw(mask).rounded_rectangle((0, 0, S - 1, S - 1), 300, fill=255)
 icon.putalpha(ImageChops.multiply(icon.getchannel("A"), mask))
-icon.save(f"{OUT}/logo_ab.png")
+# Crateras suaves, no mesmo vidro (só um pouco mais escuras e com borda de luz).
+for (x, y, r) in ():
+    cm = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(cm).ellipse((x - r, y - r, x + r, y + r), fill=70)
+    cm = cm.filter(ImageFilter.GaussianBlur(6))
+    dark = Image.new("RGBA", (S, S), (120, 135, 160, 0)); dark.putalpha(cm)
+    icon.alpha_composite(dark)
+    ring = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(ring).arc((x - r, y - r, x + r, y + r), 20, 200, fill=120, width=4)
+    lit = Image.new("RGBA", (S, S), (255, 255, 255, 0)); lit.putalpha(ring.filter(ImageFilter.GaussianBlur(1.5)))
+    icon.alpha_composite(lit)
+# Refração na borda: um anel de luz por dentro, como o vidro curvo da Apple.
+band = ImageChops.subtract(moon.filter(ImageFilter.MinFilter(9)), moon.filter(ImageFilter.MinFilter(61))).filter(ImageFilter.GaussianBlur(14))
+glow = Image.new("RGBA", (S, S), (210, 235, 255, 0)); glow.putalpha(band.point(lambda v: int(v * 0.45)))
+icon.alpha_composite(glow)
+icon.save(f"{OUT}/logo.png")
 
 sheet = Image.new("RGBA", (560, 420), (240, 240, 240, 255))
 sheet.alpha_composite(icon.resize((300, 300), Image.LANCZOS), (20, 20))
@@ -74,5 +88,5 @@ sheet.alpha_composite(dark, (340, 20))
 for j, sz in enumerate((64, 48, 32, 16)):
     sheet.alpha_composite(icon.resize((sz, sz), Image.LANCZOS), (20 + j * 80, 340))
     sheet.alpha_composite(icon.resize((sz, sz), Image.LANCZOS), (380, 40 + j * 70))
-sheet.save(f"{OUT}/logo_ab_sheet.png")
+sheet.save(f"{OUT}/logo_sheet.png")
 print("ok")
