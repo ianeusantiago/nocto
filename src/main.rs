@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 slint::include_modules!();
+use nocto_core::notify::Source;
 
 const PILL: i32 = 0;
 const BAR: i32 = 1;
@@ -64,6 +65,10 @@ struct App {
     notify_serial: u64,
     /// Últimas mensagens do WhatsApp, para a página delas.
     wa_msgs: Vec<WaMsg>,
+    mail_msgs: Vec<WaMsg>,
+    /// De onde veio o último e-mail e o último aviso (para saber o que abrir no clique).
+    mail_source: Source,
+    notify_source: Source,
     /// Ícones dos apps já lidos (destino → ícone), para não reler a cada abertura.
     icons: RefCell<std::collections::HashMap<String, Option<slint::Image>>>,
 }
@@ -239,7 +244,7 @@ impl App {
             self.refresh_calendar();
         }
         if page == 2 {
-            self.ui.set_wa_unread(0);
+            self.mark_read();
         }
         if page == 3 {
             self.refresh_settings();
@@ -250,23 +255,37 @@ impl App {
 
     /// Mensagem nova do WhatsApp: a ilha se expande por alguns segundos, como no iPhone.
     /// Não interrompe a barra, o painel nem um jogo em tela cheia.
-    fn show_whatsapp(&mut self, texts: Vec<String>) {
+    fn show_message(&mut self, source: Source, texts: Vec<String>) {
         if !self.config.whatsapp {
             return;
         }
         let Some(msg) = nocto_core::notify::message_from(&texts, self.config.whatsapp_preview) else { return };
-        // Guarda na página de mensagens (as 5 mais novas no topo).
+        let mail = source != Source::WhatsApp;
+        // Guarda na página de mensagens (as 5 mais novas no topo de cada aba).
         let now = win::local_time();
         let time = format!("{:02}:{:02}", now.3, now.4);
         let item = WaMsg { sender: msg.sender.clone().into(), text: msg.text.clone().into(), time: time.into() };
-        self.wa_msgs.insert(0, item);
-        self.wa_msgs.truncate(5);
-        self.ui.set_wa_msgs(ModelRc::new(VecModel::from(self.wa_msgs.clone())));
+        let list = if mail { &mut self.mail_msgs } else { &mut self.wa_msgs };
+        list.insert(0, item);
+        list.truncate(5);
+        let model = ModelRc::new(VecModel::from(list.clone()));
+        if mail {
+            self.mail_source = source;
+            self.ui.set_mail_msgs(model);
+        } else {
+            self.ui.set_wa_msgs(model);
+        }
         let mode = self.ui.get_mode();
-        if mode == CALENDAR && self.page == 2 {
+        if mode == CALENDAR && self.page == 2 && self.ui.get_msg_tab() == mail as i32 {
             return;
         }
-        self.ui.set_wa_unread(self.ui.get_wa_unread() + 1);
+        if mail {
+            self.ui.set_mail_unread(self.ui.get_mail_unread() + 1);
+        } else {
+            self.ui.set_wa_unread(self.ui.get_wa_unread() + 1);
+        }
+        self.notify_source = source;
+        self.ui.set_notify_mail(mail);
         if self.fullscreen_app || (mode != PILL && mode != NOTIFY) {
             return;
         }
@@ -282,6 +301,25 @@ impl App {
                 }
             })
         });
+    }
+
+    /// Zera o "não lido" da aba de mensagens que está na tela.
+    fn mark_read(&self) {
+        if self.ui.get_msg_tab() == 1 {
+            self.ui.set_mail_unread(0);
+        } else {
+            self.ui.set_wa_unread(0);
+        }
+    }
+
+    /// Abre o WhatsApp ou o e-mail (Outlook, ou o Gmail no navegador).
+    fn open_messages_app(&mut self, mail: bool) {
+        if mail {
+            let _ = nocto_core::launcher::open_url(nocto_core::notify::mail_target(self.mail_source));
+        } else {
+            let _ = std::process::Command::new("explorer.exe").arg("whatsapp:").spawn();
+        }
+        self.set_mode(PILL);
     }
 
     /// Atalhos que dá para escolher na página de configurações.
@@ -358,7 +396,13 @@ impl App {
         self.page = page;
         self.ui.set_page(page);
         if page == 2 {
-            self.ui.set_wa_unread(0);
+            // Abre na aba que tem mensagem nova (WhatsApp primeiro).
+            if self.ui.get_wa_unread() == 0 && self.ui.get_mail_unread() > 0 {
+                self.ui.set_msg_tab(1);
+            } else if self.ui.get_wa_unread() > 0 {
+                self.ui.set_msg_tab(0);
+            }
+            self.mark_read();
         }
         self.ui.set_settings_note("".into());
         self.apply_theme();
@@ -714,7 +758,7 @@ fn wire_callbacks(ui: &Island) {
     ui.on_expand(|| {
         with_app(|app| {
             // Mensagem não lida > música tocando > agenda.
-            let page = if app.ui.get_wa_unread() > 0 { 2 } else if app.ui.get_playing() { 0 } else { 1 };
+            let page = if app.ui.get_wa_unread() + app.ui.get_mail_unread() > 0 { 2 } else if app.ui.get_playing() { 0 } else { 1 };
             app.open_panel(page);
         })
     });
@@ -737,10 +781,9 @@ fn wire_callbacks(ui: &Island) {
             app.foreground_changed(win::foreground());
         })
     });
-    ui.on_open_whatsapp(|| {
-        let _ = std::process::Command::new("explorer.exe").arg("whatsapp:").spawn();
-        with_app(|app| app.set_mode(PILL));
-    });
+    ui.on_open_notified(|| with_app(|app| app.open_messages_app(app.notify_source != Source::WhatsApp)));
+    ui.on_open_messages(|mail| with_app(move |app| app.open_messages_app(mail)));
+    ui.on_msg_tab_changed(|| with_app(|app| app.mark_read()));
     ui.on_toggle_whatsapp(|| {
         with_app(|app| {
             app.config.whatsapp = !app.config.whatsapp;
@@ -960,6 +1003,9 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         volume: volume::Volume::new(),
         notify_serial: 0,
         wa_msgs: Vec::new(),
+        mail_msgs: Vec::new(),
+        mail_source: Source::Email { web: true },
+        notify_source: Source::WhatsApp,
         icons: RefCell::new(std::collections::HashMap::new()),
         config,
         dir,
@@ -989,10 +1035,18 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         if let Some(v) = std::env::var("NOCTO_SETVOL").ok().and_then(|v| v.parse::<f32>().ok()) {
             app.volume.set(v);
         }
-        // Desenvolvimento: NOCTO_WA simula uma mensagem do WhatsApp 2 s depois de abrir.
-        if std::env::var_os("NOCTO_WA").is_some() {
-            slint::Timer::single_shot(Duration::from_secs(2), || {
-                with_app(|app| app.show_whatsapp(vec!["Maria".into(), "Bora jogar hoje à noite?".into()]))
+        // Desenvolvimento: NOCTO_WA simula uma mensagem do WhatsApp 2 s depois de abrir
+        // (NOCTO_WA=mail simula um e-mail).
+        if let Some(kind) = std::env::var_os("NOCTO_WA") {
+            let mail = kind == "mail";
+            slint::Timer::single_shot(Duration::from_secs(2), move || {
+                with_app(move |app| {
+                    if mail {
+                        app.show_message(Source::Email { web: true }, vec!["Hacko".into(), "Sua inscrição foi confirmada".into()])
+                    } else {
+                        app.show_message(Source::WhatsApp, vec!["Maria".into(), "Bora jogar hoje à noite?".into()])
+                    }
+                })
             });
         }
         // Desenvolvimento: NOCTO_PLAYING simula música tocando na pílula.
@@ -1078,7 +1132,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
     });
 
     // Mensagens do WhatsApp, pelas notificações do Windows.
-    notify::watch(|texts| on_ui(move |app| app.show_whatsapp(texts)));
+    notify::watch(|source, texts| on_ui(move |app| app.show_message(source, texts)));
 
     // Troca de tema: uma thread que dorme até a próxima virada (05h, 16h, 18h).
     std::thread::spawn(|| loop {

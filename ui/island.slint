@@ -201,6 +201,26 @@ component WhatsAppLogo inherits Rectangle {
     }
 }
 
+// Envelope de e-mail, em vetor.
+component MailIcon inherits Rectangle {
+    in property <length> size: 28px;
+    width: size;
+    height: size;
+    border-radius: self.width * 0.24;
+    background: #4f8cff;
+    Path {
+        x: parent.width * 0.2;
+        y: parent.height * 0.28;
+        width: parent.width * 0.6;
+        height: parent.height * 0.44;
+        viewbox-width: 20;
+        viewbox-height: 14;
+        stroke: #ffffff;
+        stroke-width: 1.6px;
+        commands: "M1 1 H19 V13 H1 Z M1 1 L10 8 L19 1";
+    }
+}
+
 component Glyph inherits Text {
     font-family: "Segoe MDL2 Assets";
     vertical-alignment: center;
@@ -290,6 +310,12 @@ export component Island inherits Window {
     in property <bool> slide: true;
     in property <[WaMsg]> wa-msgs;
     in property <int> wa-unread;
+    in property <[WaMsg]> mail-msgs;
+    in property <int> mail-unread;
+    // Aba da página de mensagens: 0 = WhatsApp, 1 = e-mail.
+    in-out property <int> msg-tab: 0;
+    // O aviso que está aparecendo é de e-mail?
+    in property <bool> notify-mail;
     in property <string> song-title;
     in property <string> artist;
     in property <bool> spotify;
@@ -332,7 +358,9 @@ export component Island inherits Window {
     callback remove-app(string);
     callback toggle-fullscreen();
     callback cycle-hotkey();
-    callback open-whatsapp();
+    callback open-notified();
+    callback open-messages(bool);
+    callback msg-tab-changed();
     callback toggle-whatsapp();
     callback toggle-whatsapp-preview();
     callback prev-month();
@@ -463,13 +491,17 @@ export component Island inherits Window {
             opacity: root.mode == 4 ? 1 : 0;
             animate opacity { delay: 120ms; duration: 220ms; }
             TouchArea {
-                clicked => { root.open-whatsapp(); }
+                clicked => { root.open-notified(); }
             }
             HorizontalLayout {
                 padding-left: 16px;
                 padding-right: 18px;
                 spacing: 12px;
-                WhatsAppLogo {
+                if !root.notify-mail: WhatsAppLogo {
+                    size: 30px;
+                    y: (parent.height - self.height) / 2;
+                }
+                if root.notify-mail: MailIcon {
                     size: 30px;
                     y: (parent.height - self.height) / 2;
                 }
@@ -948,7 +980,7 @@ export component Island inherits Window {
                         }
                     }
                     }
-                    // Página 3: mensagens do WhatsApp que chegaram.
+                    // Página 3: mensagens (WhatsApp e e-mail, trocando pela aba de cima).
                     Rectangle {
                         x: parent.width * 2 / 4;
                         y: 0;
@@ -959,23 +991,62 @@ export component Island inherits Window {
                             padding-top: 30px;
                             spacing: 10px;
                             HorizontalLayout {
-                                spacing: 10px;
-                                height: 28px;
-                                WhatsAppLogo { size: 26px; }
-                                Text { text: "Mensagens do WhatsApp"; color: root.ink; font-size: 17px; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
+                                spacing: 12px;
+                                height: 30px;
+                                Text { text: "Mensagens"; color: root.ink; font-size: 17px; font-weight: 600; vertical-alignment: center; }
+                                // Seletor WhatsApp | E-mail.
+                                Rectangle {
+                                    width: 230px;
+                                    border-radius: 15px;
+                                    background: root.ink.with-alpha(0.08);
+                                    Rectangle {
+                                        x: 3px + root.msg-tab * (parent.width - 6px) / 2;
+                                        y: 3px;
+                                        width: (parent.width - 6px) / 2;
+                                        height: parent.height - 6px;
+                                        border-radius: 12px;
+                                        background: root.ink.with-alpha(0.16);
+                                        animate x { duration: 260ms; easing: cubic-bezier(0.25, 1.1, 0.32, 1); }
+                                    }
+                                    for tab[i] in [{ label: "WhatsApp", unread: root.wa-unread }, { label: "E-mail", unread: root.mail-unread }]: TouchArea {
+                                        x: i * parent.width / 2;
+                                        width: parent.width / 2;
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.msg-tab = i;
+                                            root.msg-tab-changed();
+                                        }
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 6px;
+                                            if i == 0: WhatsAppLogo { size: 16px; y: (parent.height - self.height) / 2; }
+                                            if i == 1: MailIcon { size: 16px; y: (parent.height - self.height) / 2; }
+                                            Text { text: tab.label; color: root.ink.with-alpha(root.msg-tab == i ? 1 : 0.65); font-size: 13px; vertical-alignment: center; }
+                                            if tab.unread > 0 && root.msg-tab != i: Rectangle {
+                                                y: (parent.height - 7px) / 2;
+                                                width: 7px;
+                                                height: 7px;
+                                                border-radius: 3.5px;
+                                                background: i == 0 ? #25d366 : #4f8cff;
+                                            }
+                                        }
+                                    }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
                                 TouchArea {
-                                    width: 120px;
+                                    width: 70px;
                                     mouse-cursor: pointer;
-                                    clicked => { root.open-whatsapp(); }
-                                    Text { text: "Abrir WhatsApp ›"; color: #25d366; font-size: 13px; vertical-alignment: center; horizontal-alignment: right; }
+                                    clicked => { root.open-messages(root.msg-tab == 1); }
+                                    Text { text: "Abrir ›"; color: root.msg-tab == 1 ? #4f8cff : #25d366; font-size: 13px; vertical-alignment: center; horizontal-alignment: right; }
                                 }
                             }
-                            if root.wa-msgs.length == 0: Text {
-                                text: "Nenhuma mensagem nova.";
+                            if (root.msg-tab == 0 ? root.wa-msgs : root.mail-msgs).length == 0: Text {
+                                text: root.msg-tab == 0 ? "Nenhuma mensagem nova." : "Nenhum e-mail novo. (Chegam pelos avisos do Outlook ou do Gmail no navegador.)";
                                 color: root.ink.with-alpha(0.55);
                                 font-size: 13px;
+                                wrap: word-wrap;
                             }
-                            for m in root.wa-msgs: Rectangle {
+                            for m in (root.msg-tab == 0 ? root.wa-msgs : root.mail-msgs): Rectangle {
                                 height: 46px;
                                 border-radius: 12px;
                                 background: root.ink.with-alpha(0.07);
@@ -1031,7 +1102,7 @@ export component Island inherits Window {
                                 }
                                 HorizontalLayout {
                                     height: 30px;
-                                    Text { text: "Avisos do WhatsApp"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Text { text: "Avisos de mensagens e e-mail"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
                                     Switch { y: 4px; on: root.whatsapp-on; ink: root.ink; accent: root.accent; toggled => { root.toggle-whatsapp(); } }
                                 }
                                 HorizontalLayout {
@@ -1143,7 +1214,7 @@ export component Island inherits Window {
                     height: 7px;
                     border-radius: 3.5px;
                     // A bolinha do WhatsApp fica verde quando há mensagem não lida.
-                    background: i == 2 && root.wa-unread > 0 && root.page != 2 ? #25d366 : root.page == i ? root.ink : root.ink.with-alpha(0.35);
+                    background: i == 2 && root.wa-unread + root.mail-unread > 0 && root.page != 2 ? (root.wa-unread > 0 ? #25d366 : #4f8cff) : root.page == i ? root.ink : root.ink.with-alpha(0.35);
                     animate width, background { duration: 250ms; }
                     TouchArea {
                         clicked => { root.go-page(i); }

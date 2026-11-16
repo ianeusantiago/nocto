@@ -4,7 +4,7 @@
 //! Tenta ser avisado por evento; se o Windows não deixar (apps sem pacote às vezes não
 //! podem assinar), consulta a lista a cada 3 s, o que custa quase nada.
 
-use nocto_core::notify::is_whatsapp;
+use nocto_core::notify::{Source, source_of};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -32,7 +32,7 @@ fn texts(n: &UserNotification) -> Option<Vec<String>> {
 }
 
 /// Lê a lista atual e chama `on_message` para cada notificação nova do WhatsApp.
-fn scan(listener: &UserNotificationListener, seen: &Mutex<HashSet<u32>>, report: bool, on_message: &(dyn Fn(Vec<String>) + Send + Sync)) {
+fn scan(listener: &UserNotificationListener, seen: &Mutex<HashSet<u32>>, report: bool, on_message: &(dyn Fn(Source, Vec<String>) + Send + Sync)) {
     let Ok(list) = listener.GetNotificationsAsync(NotificationKinds::Toast).and_then(|op| op.join()) else {
         return;
     };
@@ -60,16 +60,16 @@ fn scan(listener: &UserNotificationListener, seen: &Mutex<HashSet<u32>>, report:
             .and_then(|d| d.DisplayName())
             .map(|s| s.to_string())
             .unwrap_or_default();
-        if is_whatsapp(&app) {
-            if let Some(t) = texts(&n) {
-                on_message(t);
+        if let Some(t) = texts(&n) {
+            if let Some(source) = source_of(&app, &t) {
+                on_message(source, t);
             }
         }
     }
 }
 
 /// Começa a observar. `on_message` recebe os textos da notificação (quem mandou, mensagem…).
-pub fn watch(on_message: impl Fn(Vec<String>) + Send + Sync + 'static) {
+pub fn watch(on_message: impl Fn(Source, Vec<String>) + Send + Sync + 'static) {
     std::thread::spawn(move || {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -81,7 +81,7 @@ pub fn watch(on_message: impl Fn(Vec<String>) + Send + Sync + 'static) {
         {
             return;
         }
-        let on_message: Arc<dyn Fn(Vec<String>) + Send + Sync> = Arc::new(on_message);
+        let on_message: Arc<dyn Fn(Source, Vec<String>) + Send + Sync> = Arc::new(on_message);
         let seen = Arc::new(Mutex::new(HashSet::new()));
         // As notificações que já estavam lá não viram aviso.
         scan(&listener, &seen, false, &*on_message);
