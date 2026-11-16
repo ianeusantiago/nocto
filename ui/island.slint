@@ -73,14 +73,36 @@ component Knob inherits Rectangle {
     width: 64px;
     height: 64px;
     opacity: root.active ? 1 : 0.4;
-    for i in 25: Rectangle {
-        property <angle> a: -135deg + i * 11.25deg;
-        width: 4px;
-        height: 4px;
-        border-radius: 2px;
-        x: root.width / 2 + 28px * sin(self.a) - 2px;
-        y: root.height / 2 - 28px * cos(self.a) - 2px;
-        background: i / 24 <= root.value + 0.001 ? root.accent : root.ink.with-alpha(0.18);
+    // Anel em arco liso (trilho apagado + parte preenchida), de -135° a +135°.
+    Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: 64;
+        viewbox-height: 64;
+        stroke: root.ink.with-alpha(0.18);
+        stroke-width: 4px;
+        stroke-line-cap: round;
+        MoveTo { x: 12.2; y: 51.8; }
+        ArcTo { x: 51.8; y: 51.8; radius-x: 28; radius-y: 28; large-arc: true; sweep: true; }
+    }
+    if root.value > 0.005: Path {
+        property <angle> a: -135deg + root.value * 270deg;
+        width: root.width;
+        height: root.height;
+        viewbox-width: 64;
+        viewbox-height: 64;
+        stroke: root.accent;
+        stroke-width: 4px;
+        stroke-line-cap: round;
+        MoveTo { x: 12.2; y: 51.8; }
+        ArcTo {
+            x: 32 + 28 * sin(a);
+            y: 32 - 28 * cos(a);
+            radius-x: 28;
+            radius-y: 28;
+            large-arc: root.value > 0.6667;
+            sweep: true;
+        }
     }
     Rectangle {
         x: 12px;
