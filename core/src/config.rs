@@ -94,6 +94,10 @@ pub struct Config {
     /// Esconde a pílula quando o app em primeiro plano ocupa a tela inteira (jogos).
     pub hide_in_fullscreen: bool,
     pub compact: CompactMode,
+    /// Avisos do WhatsApp na ilha.
+    pub whatsapp: bool,
+    /// Mostrar o texto das mensagens (desligado: só "Nova mensagem").
+    pub whatsapp_preview: bool,
 }
 
 impl Default for Config {
@@ -104,6 +108,8 @@ impl Default for Config {
             spotify_client_id: String::new(),
             hide_in_fullscreen: true,
             compact: CompactMode::Auto,
+            whatsapp: true,
+            whatsapp_preview: true,
         }
     }
 }
@@ -203,5 +209,18 @@ mod compact_tests {
         assert!(CompactMode::Music.shows_music(true, false));
         assert!(!CompactMode::Music.shows_music(false, false), "sem música → relógio");
         assert!(!CompactMode::Clock.shows_music(true, true));
+    }
+}
+
+#[cfg(test)]
+mod whatsapp_tests {
+    use super::*;
+
+    #[test]
+    fn whatsapp_options_default_on() {
+        let c = Config::from_json("{}");
+        assert!(c.whatsapp && c.whatsapp_preview);
+        let c = Config::from_json(r#"{"whatsapp_preview":false}"#);
+        assert!(c.whatsapp && !c.whatsapp_preview);
     }
 }

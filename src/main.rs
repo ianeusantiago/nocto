@@ -2,6 +2,7 @@
 
 mod glass;
 mod media;
+mod notify;
 mod volume;
 mod win;
 
@@ -23,6 +24,7 @@ const PILL: i32 = 0;
 const BAR: i32 = 1;
 const CALENDAR: i32 = 2;
 const DROP: i32 = 3;
+const NOTIFY: i32 = 4;
 
 const MONTHS: [&str; 12] = [
     "janeiro", "fevereiro", "março", "abril", "maio", "junho",
@@ -55,13 +57,15 @@ struct App {
     /// Aviso que substitui a data na pílula (ex.: atalho ocupado).
     pill_note: String,
     volume: volume::Volume,
+    /// Conta os avisos para cada um fechar só a si mesmo.
+    notify_serial: u64,
     /// Ícones dos apps já lidos (destino → ícone), para não reler a cada abertura.
     icons: RefCell<std::collections::HashMap<String, Option<slint::Image>>>,
 }
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
 const WINDOW_W: f32 = 720.0;
-const WINDOW_H: f32 = 360.0;
+const WINDOW_H: f32 = 400.0;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -140,7 +144,8 @@ impl App {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
             CALENDAR if self.page == 0 => (680.0, 214.0, 40.0),
-            CALENDAR if self.page == 2 => (680.0, 300.0, 40.0),
+            CALENDAR if self.page == 2 => (680.0, 380.0, 40.0),
+            NOTIFY => (440.0, 64.0, 32.0),
             CALENDAR => (680.0, 340.0, 40.0),
             DROP => (440.0, 128.0, 36.0),
             _ if ui.get_show_music() => (360.0, 38.0, 19.0),
@@ -199,6 +204,31 @@ impl App {
         self.update_progress_timer();
     }
 
+    /// Mensagem nova do WhatsApp: a ilha se expande por alguns segundos, como no iPhone.
+    /// Não interrompe a barra, o painel nem um jogo em tela cheia.
+    fn show_whatsapp(&mut self, texts: Vec<String>) {
+        if !self.config.whatsapp || self.fullscreen_app || self.hidden.get() {
+            return;
+        }
+        let mode = self.ui.get_mode();
+        if mode != PILL && mode != NOTIFY {
+            return;
+        }
+        let Some(msg) = nocto_core::notify::message_from(&texts, self.config.whatsapp_preview) else { return };
+        self.ui.set_notify_sender(msg.sender.into());
+        self.ui.set_notify_text(msg.text.into());
+        self.set_mode(NOTIFY);
+        self.notify_serial += 1;
+        let serial = self.notify_serial;
+        slint::Timer::single_shot(Duration::from_secs(6), move || {
+            with_app(move |app| {
+                if app.ui.get_mode() == NOTIFY && app.notify_serial == serial {
+                    app.set_mode(PILL);
+                }
+            })
+        });
+    }
+
     /// Atalhos que dá para escolher na página de configurações.
     const HOTKEYS: [&'static str; 4] = ["alt+shift+space", "ctrl+alt+n", "win+alt+space", "ctrl+shift+space"];
 
@@ -220,6 +250,8 @@ impl App {
         self.ui.set_apps(ModelRc::new(VecModel::from(apps)));
         self.ui.set_hide_fullscreen(self.config.hide_in_fullscreen);
         self.ui.set_hotkey_label(self.config.hotkey.replace('+', " + ").into());
+        self.ui.set_whatsapp_on(self.config.whatsapp);
+        self.ui.set_whatsapp_preview(self.config.whatsapp_preview);
     }
 
     /// Ícone do app (do .exe ou atalho), lido uma vez e guardado.
@@ -623,6 +655,24 @@ fn wire_callbacks(ui: &Island) {
             app.foreground_changed(win::foreground());
         })
     });
+    ui.on_open_whatsapp(|| {
+        let _ = std::process::Command::new("explorer.exe").arg("whatsapp:").spawn();
+        with_app(|app| app.set_mode(PILL));
+    });
+    ui.on_toggle_whatsapp(|| {
+        with_app(|app| {
+            app.config.whatsapp = !app.config.whatsapp;
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.refresh_settings();
+        })
+    });
+    ui.on_toggle_whatsapp_preview(|| {
+        with_app(|app| {
+            app.config.whatsapp_preview = !app.config.whatsapp_preview;
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.refresh_settings();
+        })
+    });
     ui.on_cycle_hotkey(|| {
         with_app(|app| {
             let i = App::HOTKEYS.iter().position(|h| *h == app.config.hotkey).map_or(0, |i| i + 1);
@@ -824,6 +874,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         progress_timer: slint::Timer::default(),
         pill_note: String::new(),
         volume: volume::Volume::new(),
+        notify_serial: 0,
         icons: RefCell::new(std::collections::HashMap::new()),
         config,
         dir,
@@ -852,6 +903,12 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         // Desenvolvimento: NOCTO_SETVOL=0.0..1.0 define o volume do Spotify ao abrir.
         if let Some(v) = std::env::var("NOCTO_SETVOL").ok().and_then(|v| v.parse::<f32>().ok()) {
             app.volume.set(v);
+        }
+        // Desenvolvimento: NOCTO_WA simula uma mensagem do WhatsApp 2 s depois de abrir.
+        if std::env::var_os("NOCTO_WA").is_some() {
+            slint::Timer::single_shot(Duration::from_secs(2), || {
+                with_app(|app| app.show_whatsapp(vec!["Maria".into(), "Bora jogar hoje à noite?".into()]))
+            });
         }
         // Desenvolvimento: NOCTO_PLAYING simula música tocando na pílula.
         if std::env::var_os("NOCTO_PLAYING").is_some() {
@@ -934,6 +991,9 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
             }
         })
     });
+
+    // Mensagens do WhatsApp, pelas notificações do Windows.
+    notify::watch(|texts| on_ui(move |app| app.show_whatsapp(texts)));
 
     // Troca de tema: uma thread que dorme até a próxima virada (05h, 16h, 18h).
     std::thread::spawn(|| loop {
