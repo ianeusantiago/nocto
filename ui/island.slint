@@ -285,6 +285,7 @@ export component Island inherits Window {
     // 0 pílula, 1 barra de comando, 2 calendário, 3 soltar arquivo
     in property <int> mode: 0;
     in property <color> glass: #0b2a44b3;
+    in property <bool> solid;
     in property <color> accent: #2bb4ff;
     in property <color> ink: #ffffff;
 
@@ -423,6 +424,10 @@ export component Island inherits Window {
         width: root.island-w;
         height: root.island-h;
         clip: true;
+        // Sem o vidro do Windows (falhou ao criar, ex.: Windows antigo): fundo sólido no lugar.
+        background: root.solid ? root.glass.with-alpha(0.97) : transparent;
+        border-bottom-left-radius: root.solid ? min(root.island-h / 2, 40px) : 0;
+        border-bottom-right-radius: self.border-bottom-left-radius;
         animate x, width, height { duration: 420ms; easing: cubic-bezier(0.25, 1.28, 0.32, 1); }
 
         // ───────── Pílula (compacta) ─────────

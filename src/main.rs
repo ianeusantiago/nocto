@@ -1057,6 +1057,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
     win::setup(hwnd);
     win::place_fixed(hwnd, WINDOW_W, WINDOW_H, ui.window().scale_factor());
     let glass = if std::env::var_os("NOCTO_NOGLASS").is_some() { None } else { glass::Glass::new(hwnd).ok() };
+    ui.set_solid(glass.is_none());
     if let Some(g) = &glass {
         win::place_fixed(g.hwnd, WINDOW_W, WINDOW_H, ui.window().scale_factor());
         // As duas janelas ficam sempre "mostradas"; para sumir, só a área visível muda.

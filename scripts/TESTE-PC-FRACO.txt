@@ -1,0 +1,19 @@
+TESTE DO NOCTO NUM PC FRACO / WINDOWS 10
+=========================================
+
+1. Extraia esta pasta em qualquer lugar (ex.: Área de Trabalho).
+2. Dê dois cliques em nocto.exe. A pílula aparece no topo da tela.
+   - Se o Windows avisar "O Windows protegeu o computador": Mais informações > Executar assim mesmo.
+3. Confira e anote (sim/não):
+   a) A pílula aparece no topo, com fundo (vidro azulado ou cor sólida)?
+   b) Clicar na pílula abre o painel (agenda/música) e as animações ficam fluidas?
+   c) Alt+Shift+Espaço abre a barra de comando? Digite "abre calculadora" e Enter.
+   d) Abrindo um jogo em tela cheia, a pílula some?
+4. Medir o consumo: com o Nocto aberto, clique com o botão direito em medir.ps1 >
+   "Executar com o PowerShell". Espere 30 s e mande a linha que aparecer
+   (WorkingSetMB / CpuPercent).
+5. Mande também: modelo do notebook, processador, memória RAM e versão do Windows
+   (Configurações > Sistema > Sobre).
+
+Para fechar o Nocto: Gerenciador de Tarefas > nocto.exe > Finalizar tarefa.
+Nada é instalado; para remover, é só apagar a pasta (e %APPDATA%\Nocto, se quiser).

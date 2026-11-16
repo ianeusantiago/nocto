@@ -35,4 +35,18 @@ CPU em % do PC inteiro (16 núcleos): 0,24% ≈ 4% de um núcleo.
 ## Ainda não medido
 
 - FPS em jogo com e sem o Nocto (três execuções). Em tela cheia a pílula some e nada anima (0,01% de CPU, medido acima), então o esperado é diferença dentro do ruído; falta confirmar num jogo de verdade.
-- Notebook mais fraco e Windows 10.
+- Notebook mais fraco e Windows 10 de verdade (kit pronto: `dist/Nocto-teste.zip`, gerado com `scripts/TESTE-PC-FRACO.txt`).
+
+## PC fraco simulado (2026-11-17)
+
+Nocto preso a 2 núcleos (afinidade), mesma máquina:
+
+| Cenário | CPU dos 2 núcleos | RAM |
+|---|---|---|
+| Parado | 0,3% | 34 MB |
+| Animando sem parar (troca de formato a cada 1,5 s) | 1,1% | 35 MB |
+| Música tocando (ondinha) | 0,5% | 34 MB |
+
+Preparos para Windows 10 / PC limpo:
+- **Runtime do C++ embutido** (`static_vcruntime`): o exe não depende mais de `vcruntime140.dll`; só das DLLs que já vêm no Windows 10.
+- **Sem o vidro do Windows** (se a composição falhar), a ilha ganha fundo sólido na cor do tema em vez de ficar transparente e ilegível.
