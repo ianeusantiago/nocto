@@ -1,6 +1,7 @@
 [package]
 name = "nocto"
 version = "0.3.0"
+license = "MIT"
 edition = "2024"
 
 [dependencies]

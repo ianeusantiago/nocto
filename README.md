@@ -15,6 +15,7 @@
   <img alt="Windows 10 e 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0b2a44?style=for-the-badge&logo=windows">
   <img alt="Feito em Rust" src="https://img.shields.io/badge/feito%20em-Rust-e8843a?style=for-the-badge&logo=rust">
   <img alt="Grátis" src="https://img.shields.io/badge/100%25-grátis-25d366?style=for-the-badge">
+  <a href="LICENSE"><img alt="Licença MIT" src="https://img.shields.io/badge/licença-MIT-8a8f98?style=for-the-badge"></a>
 </p>
 
 <p align="center">
@@ -125,5 +126,9 @@ cargo test -p nocto-core
 - Jogos em **tela cheia exclusiva** não deixam nenhuma janela aparecer por cima; em tela cheia sem borda funciona.
 - Sem os "Efeitos de transparência" do Windows, a ilha usa cor sólida no lugar do vidro.
 - A voz offline entende bem comandos em português; nomes de música em inglês saem melhor digitados.
+
+## Licença
+
+[MIT](LICENSE): use, modifique e distribua à vontade, mantendo o aviso de copyright.
 
 <p align="center"><sub>Feito com 🌙 em Rust.</sub></p>
