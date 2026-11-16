@@ -12,6 +12,10 @@ Máquina: Ryzen 7 + RTX 4050, Windows 11. Medido com `scripts/measure.ps1` (work
 | 2026-11-15 | v0.2: vidro do compositor + janela fixa, pílula parada (20 s) | 26,6 MB | 5,2 MB | 0,00% |
 | 2026-11-15 | Páginas + capa do álbum, pílula parada com relógio (20 s) | 29,9 MB | 5,7 MB | 0,00% |
 | 2026-11-15 | Página de música aberta, música pausada (15 s) | 30,8 MB | 6,4 MB | 0,00% |
+| 2026-11-17 | v0.3, antes da correção: música tocando, ondinha a cada quadro (20 s) | 35 MB | — | 0,32–0,46% |
+| 2026-11-17 | v0.3: ondinha a ~11 quadros/s, pílula visível com música (20 s) | 36 MB | — | 0,24% |
+| 2026-11-17 | v0.3: pílula escondida (janela cobrindo o topo / jogo) (20 s) | 34 MB | — | 0,01% |
+| 2026-11-17 | v0.3: escuta do "Nocto" ligada, sala em silêncio (20 s) | 127 MB | — | +0,14% |
 
 Executável release: ~8,8 MB.
 
@@ -24,7 +28,11 @@ Executável release: ~8,8 MB.
 - **Modo jogo.** Quando o app da frente ocupa o monitor inteiro, a pílula é escondida (`ShowWindow(SW_HIDE)`): zero pixels sobre o jogo. O atalho continua funcionando.
 - `opt-level = "s"`, LTO, `panic = "abort"`, `strip`.
 
+CPU em % do PC inteiro (16 núcleos): 0,24% ≈ 4% de um núcleo.
+
+- **Ondinha da música (v0.3).** Redesenhava a cada quadro (≈8% de um núcleo) e continuava mesmo com a pílula escondida. Agora anda em passos de 90 ms e para quando a pílula não aparece.
+
 ## Ainda não medido
 
-- FPS em jogo com e sem o Nocto (três execuções), pedido na Task 10.
+- FPS em jogo com e sem o Nocto (três execuções). Em tela cheia a pílula some e nada anima (0,01% de CPU, medido acima), então o esperado é diferença dentro do ruído; falta confirmar num jogo de verdade.
 - Notebook mais fraco e Windows 10.

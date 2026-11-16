@@ -149,6 +149,7 @@ impl App {
     }
 
     fn visible(&self, visible: bool) {
+        self.ui.set_pill_visible(visible);
         if self.hidden.replace(!visible) != !visible {
             self.apply_region();
         }

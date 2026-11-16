@@ -344,6 +344,15 @@ export component Island inherits Window {
     in property <bool> whatsapp-on: true;
     in property <bool> whatsapp-preview: true;
     in property <bool> wake-on;
+    // A pílula está aparecendo? (escondida atrás de janela ou em jogo: nada anima)
+    in property <bool> pill-visible: true;
+    // Passo da ondinha da música: ~11 quadros/s em vez de redesenhar a cada quadro.
+    property <int> eq-step;
+    Timer {
+        interval: 90ms;
+        running: root.mode == 0 && root.show-music && root.playing && root.pill-visible;
+        triggered => { root.eq-step += 1; }
+    }
     in property <bool> has-volume;
 
     callback submit(string);
@@ -468,7 +477,7 @@ export component Island inherits Window {
                     for i in 4: Rectangle {
                         x: i * 5px;
                         width: 3px;
-                        height: 4px + 12px * abs(sin((animation-tick() / 1ms) * 0.45deg + i * 70deg));
+                        height: 4px + 12px * abs(sin(root.eq-step * 37deg + i * 70deg));
                         y: (parent.height - self.height) / 2;
                         border-radius: 1.5px;
                         background: root.accent;
