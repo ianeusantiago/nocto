@@ -1075,8 +1075,13 @@ fn wire_callbacks(ui: &Island) {
             }),
             WindowEvent::Focused(_) | WindowEvent::Resized(_) | WindowEvent::Occluded(false) | WindowEvent::ScaleFactorChanged { .. } => {
                 let lost_focus = matches!(event, WindowEvent::Focused(false));
+                let got_focus = matches!(event, WindowEvent::Focused(true));
                 with_app(move |app| {
                     app.force_repaint();
+                    // O foco de verdade chega depois do pedido: só agora a caixa pode recebê-lo.
+                    if got_focus && app.ui.get_mode() == BAR {
+                        app.ui.invoke_focus_input();
+                    }
                     if lost_focus {
                         let mode = app.ui.get_mode();
                         // Ouvindo um comando de voz: a barra fica aberta mesmo sem foco

@@ -207,6 +207,12 @@ pub fn activate(raw: isize) {
         let fg_thread = GetWindowThreadProcessId(fg, None);
         let me = windows::Win32::System::Threading::GetCurrentThreadId();
         let attached = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, true).as_bool();
+        // Uma "tecla" vazia faz o Windows considerar que este processo recebeu a última
+        // entrada do usuário, condição para poder trazer a janela para a frente.
+        let nudge = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VIRTUAL_KEY(0x87), ..Default::default() } } };
+        let mut up = nudge;
+        up.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput(&[nudge, up], std::mem::size_of::<INPUT>() as i32);
         let _ = BringWindowToTop(hwnd);
         let _ = SetForegroundWindow(hwnd);
         let _ = SetFocus(Some(hwnd));
