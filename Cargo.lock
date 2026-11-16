@@ -2851,7 +2851,7 @@ dependencies = [
 
 [[package]]
 name = "nocto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cpal",
  "libloading 0.9.1",

@@ -138,7 +138,8 @@ impl App {
 
     /// Confere a janela da frente e o mouse (a cada 0,5 s; custa quase nada).
     fn check_cover(&mut self) {
-        let covered = win::covers_top(win::foreground());
+        // Desenvolvimento: NOCTO_NOCOVER ignora janelas cobrindo o topo (para prints).
+        let covered = std::env::var_os("NOCTO_NOCOVER").is_none() && win::covers_top(win::foreground());
         // Já espiando: continua enquanto o mouse estiver sobre a pílula.
         let peek = covered && win::cursor_at_top(if self.peek { 60 } else { 2 });
         if (covered, peek) != (self.covered, self.peek) {
