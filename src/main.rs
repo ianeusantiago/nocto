@@ -82,7 +82,7 @@ struct App {
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
 const WINDOW_W: f32 = 720.0;
-const WINDOW_H: f32 = 520.0;
+const WINDOW_H: f32 = 560.0;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -183,7 +183,7 @@ impl App {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
             CALENDAR if self.page == 0 => (680.0, 214.0, 40.0),
-            CALENDAR if self.page == 3 => (680.0, 500.0, 40.0),
+            CALENDAR if self.page == 3 => (680.0, 540.0, 40.0),
             NOTIFY => (440.0, 64.0, 32.0),
             CALENDAR => (680.0, 340.0, 40.0),
             DROP if self.ui.get_has_drop_preview() => (580.0, 150.0, 40.0),
@@ -356,6 +356,7 @@ impl App {
         self.ui.set_whatsapp_on(self.config.whatsapp);
         self.ui.set_whatsapp_preview(self.config.whatsapp_preview);
         self.ui.set_wake_on(self.config.wake_word);
+        self.ui.set_autostart_on(self.config.autostart);
         self.ui.set_open_page_label(self.config.open_page.label().into());
         self.ui.set_glass_label(self.config.glass.label().into());
     }
@@ -575,7 +576,12 @@ impl App {
         }
     }
 
-    fn spotify_config(&self) -> spotify::Config {
+    fn spotify_config(&mut self) -> spotify::Config {
+        // Client ID vazio na memória: relê o arquivo (pode ter sido editado à mão).
+        if self.config.spotify_client_id.is_empty() {
+            let disk = Config::load(&self.dir.join("config.json"));
+            self.config.spotify_client_id = disk.spotify_client_id;
+        }
         spotify::Config {
             client_id: self.config.spotify_client_id.clone(),
             token_path: self.dir.join("spotify-token.json"),
@@ -903,6 +909,14 @@ fn wire_callbacks(ui: &Island) {
         with_app(|app| {
             app.config.whatsapp = !app.config.whatsapp;
             let _ = app.config.save(&app.dir.join("config.json"));
+            app.refresh_settings();
+        })
+    });
+    ui.on_toggle_autostart(|| {
+        with_app(|app| {
+            app.config.autostart = !app.config.autostart;
+            let _ = app.config.save(&app.dir.join("config.json"));
+            win::set_autostart(app.config.autostart);
             app.refresh_settings();
         })
     });
@@ -1283,6 +1297,11 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
             });
             app.update_compact();
             app.update_progress_timer();
+            // Música mudou com a página aberta e o knob sem volume: tenta achar de novo
+            // (o Spotify só cria a sessão de áudio quando começa a tocar).
+            if app.ui.get_mode() == CALENDAR && !app.ui.get_has_volume() {
+                app.refresh_volume();
+            }
             if had != app.ui.get_has_track() && app.ui.get_mode() == PILL {
                 app.layout();
             }
@@ -1291,7 +1310,10 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
 
     // Mensagens do WhatsApp, pelas notificações do Windows.
     notify::watch(|source, texts| on_ui(move |app| app.show_message(source, texts)));
-    with_app(|app| app.apply_wake());
+    with_app(|app| {
+        app.apply_wake();
+        win::set_autostart(app.config.autostart);
+    });
 
     // Troca de tema: uma thread que dorme até a próxima virada (05h, 16h, 18h).
     std::thread::spawn(|| loop {

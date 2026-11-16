@@ -25,17 +25,22 @@ fn spotify_sessions() -> Vec<ISimpleAudioVolume> {
         let Ok(enumerator) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) else {
             return out;
         };
-        let Ok(device) = enumerator.GetDefaultAudioEndpoint(eRender, eMultimedia) else { return out };
-        let Ok(manager) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { return out };
-        let Ok(sessions) = manager.GetSessionEnumerator() else { return out };
-        let count = sessions.GetCount().unwrap_or(0);
-        for i in 0..count {
-            let Ok(control) = sessions.GetSession(i) else { continue };
-            let Ok(control2) = control.cast::<IAudioSessionControl2>() else { continue };
-            let Ok(pid) = control2.GetProcessId() else { continue };
-            if crate::win::process_name(pid).is_some_and(|n| n == "spotify.exe") {
-                if let Ok(volume) = control.cast::<ISimpleAudioVolume>() {
-                    out.push(volume);
+        // Todas as saídas ativas, não só a padrão: o Spotify pode estar tocando no fone
+        // ou numa saída escolhida no próprio app.
+        let Ok(devices) = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) else { return out };
+        for d in 0..devices.GetCount().unwrap_or(0) {
+            let Ok(device) = devices.Item(d) else { continue };
+            let Ok(manager) = device.Activate::<IAudioSessionManager2>(CLSCTX_ALL, None) else { continue };
+            let Ok(sessions) = manager.GetSessionEnumerator() else { continue };
+            let count = sessions.GetCount().unwrap_or(0);
+            for i in 0..count {
+                let Ok(control) = sessions.GetSession(i) else { continue };
+                let Ok(control2) = control.cast::<IAudioSessionControl2>() else { continue };
+                let Ok(pid) = control2.GetProcessId() else { continue };
+                if crate::win::process_name(pid).is_some_and(|n| n == "spotify.exe") {
+                    if let Ok(volume) = control.cast::<ISimpleAudioVolume>() {
+                        out.push(volume);
+                    }
                 }
             }
         }

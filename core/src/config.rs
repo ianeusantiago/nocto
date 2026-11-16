@@ -187,6 +187,8 @@ pub struct Config {
     pub wake_word: bool,
     pub open_page: OpenPage,
     pub glass: GlassMode,
+    /// Abrir o Nocto junto com o Windows.
+    pub autostart: bool,
 }
 
 impl Default for Config {
@@ -202,6 +204,7 @@ impl Default for Config {
             wake_word: false,
             open_page: OpenPage::Auto,
             glass: GlassMode::Liquid,
+            autostart: true,
         }
     }
 }
@@ -212,11 +215,25 @@ impl Config {
     }
 
     pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path).map(|s| Self::from_json(&s)).unwrap_or_default()
+        // Lido no meio de uma gravação, o arquivo pode vir pela metade: tenta de novo
+        // antes de desistir, para não perder o Client ID e as escolhas.
+        for _ in 0..5 {
+            let Ok(text) = std::fs::read_to_string(path) else { return Self::default() };
+            if let Ok(cfg) = serde_json::from_str(&text) {
+                return cfg;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        // Corrompido mesmo: guarda uma cópia antes de voltar ao padrão.
+        let _ = std::fs::copy(path, path.with_extension("json.bak"));
+        Self::default()
     }
 
+    /// Grava num arquivo temporário e troca de uma vez: quem ler nunca vê pela metade.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        std::fs::write(path, serde_json::to_vec_pretty(self)?)
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
+        std::fs::rename(&tmp, path)
     }
 }
 

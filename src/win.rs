@@ -197,9 +197,38 @@ pub fn foreground() -> isize {
     unsafe { GetForegroundWindow().0 as isize }
 }
 
+/// Traz a janela para a frente com o foco do teclado, mesmo vindo de outro app.
+/// O Windows costuma recusar SetForegroundWindow de quem não está na frente; ligar
+/// por um instante a entrada da thread da janela da frente à nossa resolve.
 pub fn activate(raw: isize) {
     unsafe {
-        let _ = SetForegroundWindow(h(raw));
+        let hwnd = h(raw);
+        let fg = GetForegroundWindow();
+        let fg_thread = GetWindowThreadProcessId(fg, None);
+        let me = windows::Win32::System::Threading::GetCurrentThreadId();
+        let attached = fg_thread != 0 && fg_thread != me && AttachThreadInput(me, fg_thread, true).as_bool();
+        let _ = BringWindowToTop(hwnd);
+        let _ = SetForegroundWindow(hwnd);
+        let _ = SetFocus(Some(hwnd));
+        if attached {
+            let _ = AttachThreadInput(me, fg_thread, false);
+        }
+    }
+}
+
+/// Liga/desliga o Nocto junto com o Windows (chave "Run" do usuário, sem admin).
+pub fn set_autostart(on: bool) {
+    use windows::Win32::System::Registry::*;
+    unsafe {
+        let key = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+        if on {
+            let Ok(exe) = std::env::current_exe() else { return };
+            let value: Vec<u16> = format!("\"{}\"", exe.display()).encode_utf16().chain(Some(0)).collect();
+            let bytes = std::slice::from_raw_parts(value.as_ptr() as *const u8, value.len() * 2);
+            let _ = RegSetKeyValueW(HKEY_CURRENT_USER, key, w!("Nocto"), REG_SZ.0, Some(bytes.as_ptr() as _), bytes.len() as u32);
+        } else {
+            let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, key, w!("Nocto"));
+        }
     }
 }
 
