@@ -204,10 +204,12 @@ pub fn roaming_appdata() -> Option<std::path::PathBuf> {
     }
 }
 
-/// Som de aviso do Windows (o mesmo das notificações).
+/// O "plim" do Nocto (assets/timer.wav, embutido no exe), tocado sem travar a interface.
 pub fn alert_sound() {
+    use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
+    static CHIME: &[u8] = include_bytes!("../assets/timer.wav");
     unsafe {
-        let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(MB_ICONASTERISK);
+        let _ = PlaySoundW(windows::core::PCWSTR(CHIME.as_ptr() as _), None, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
     }
 }
 
