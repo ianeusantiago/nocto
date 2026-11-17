@@ -28,6 +28,8 @@ const BAR: i32 = 1;
 const CALENDAR: i32 = 2;
 const DROP: i32 = 3;
 const NOTIFY: i32 = 4;
+/// Client ID do app do Nocto no Spotify, usado se o config.json não tiver um.
+const DEFAULT_SPOTIFY_CLIENT_ID: &str = "29d3c1690e7c4e2791e0d5f4c0e9ab9a";
 
 const MONTHS: [&str; 12] = [
     "janeiro", "fevereiro", "março", "abril", "maio", "junho",
@@ -582,6 +584,10 @@ impl App {
             let disk = Config::load(&self.dir.join("config.json"));
             self.config.spotify_client_id = disk.spotify_client_id;
         }
+        // Último recurso: o Client ID do app do Nocto (não é segredo; o login usa PKCE).
+        if self.config.spotify_client_id.is_empty() {
+            self.config.spotify_client_id = DEFAULT_SPOTIFY_CLIENT_ID.into();
+        }
         spotify::Config {
             client_id: self.config.spotify_client_id.clone(),
             token_path: self.dir.join("spotify-token.json"),
@@ -807,7 +813,11 @@ impl App {
 }
 
 fn data_dir() -> PathBuf {
-    let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    // Pasta pedida ao próprio Windows (não à variável APPDATA, que pode faltar quando o
+    // Nocto abre junto com o computador); a variável fica só de reserva.
+    let base = win::roaming_appdata()
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("."));
     let dir = base.join("Nocto");
     let _ = std::fs::create_dir_all(&dir);
     dir

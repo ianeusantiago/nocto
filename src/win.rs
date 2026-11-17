@@ -193,6 +193,17 @@ pub fn cursor_at_top(reach: i32) -> bool {
     }
 }
 
+/// %APPDATA% (Roaming) perguntado ao Windows.
+pub fn roaming_appdata() -> Option<std::path::PathBuf> {
+    use windows::Win32::UI::Shell::{FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    unsafe {
+        let p = SHGetKnownFolderPath(&FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, None).ok()?;
+        let s = p.to_string().ok();
+        windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as _));
+        s.map(std::path::PathBuf::from)
+    }
+}
+
 pub fn foreground() -> isize {
     unsafe { GetForegroundWindow().0 as isize }
 }
