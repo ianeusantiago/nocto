@@ -455,7 +455,7 @@ impl App {
             self.refresh_clips();
             self.layout();
         }
-        if self.config.clip_flash && self.ui.get_mode() == PILL && !self.hidden.get() {
+        if self.config.clip_flash && self.ui.get_mode() == PILL && !self.fullscreen_app {
             self.ui.set_pill_flash(if flash.is_empty() { " ".into() } else { flash.into() });
             self.layout();
             self.clip_serial += 1;
