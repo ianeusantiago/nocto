@@ -18,6 +18,17 @@ pub struct Volume {
     tx: Sender<Request>,
 }
 
+/// O ouvido percebe volume em escala logarítmica: com o valor direto do mixer, 13% já
+/// soava alto e de 70% a 100% quase não mudava. O knob usa uma curva cúbica (≈ decibéis):
+/// 50% do knob ≈ -18 dB, 13% quase mudo, e cada trecho do knob muda o som por igual.
+fn to_gain(knob: f32) -> f32 {
+    knob.clamp(0.0, 1.0).powi(3)
+}
+
+fn from_gain(gain: f32) -> f32 {
+    gain.clamp(0.0, 1.0).cbrt()
+}
+
 /// Sessões de áudio do Spotify (ele pode ter mais de um processo tocando).
 fn spotify_sessions() -> Vec<ISimpleAudioVolume> {
     let mut out = Vec::new();
@@ -66,11 +77,11 @@ fn worker(rx: Receiver<Request>) {
         if let Some(v) = set {
             for s in &sessions {
                 unsafe {
-                    let _ = s.SetMasterVolume(v.clamp(0.0, 1.0), std::ptr::null());
+                    let _ = s.SetMasterVolume(to_gain(v), std::ptr::null());
                 }
             }
         }
-        let current = sessions.first().and_then(|s| unsafe { s.GetMasterVolume().ok() });
+        let current = sessions.first().and_then(|s| unsafe { s.GetMasterVolume().ok() }).map(from_gain);
         for reply in gets {
             reply(current);
         }
