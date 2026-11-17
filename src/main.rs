@@ -88,7 +88,7 @@ struct App {
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
 const WINDOW_W: f32 = 720.0;
-const WINDOW_H: f32 = 560.0;
+const WINDOW_H: f32 = 640.0;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -189,7 +189,7 @@ impl App {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
             CALENDAR if self.page == 0 => (680.0, 214.0, 40.0),
-            CALENDAR if self.page == 3 => (680.0, 540.0, 40.0),
+            CALENDAR if self.page == 3 => (680.0, 620.0, 40.0),
             NOTIFY => (440.0, 64.0, 32.0),
             CALENDAR => (680.0, 340.0, 40.0),
             DROP if self.ui.get_has_drop_preview() => (580.0, 150.0, 40.0),
@@ -423,6 +423,8 @@ impl App {
         self.ui.set_whatsapp_preview(self.config.whatsapp_preview);
         self.ui.set_wake_on(self.config.wake_word);
         self.ui.set_autostart_on(self.config.autostart);
+        let own = !self.config.spotify_client_id.is_empty() && self.config.spotify_client_id != DEFAULT_SPOTIFY_CLIENT_ID;
+        self.ui.set_spotify_own(own);
         self.ui.set_open_page_label(self.config.open_page.label().into());
         self.ui.set_glass_label(self.config.glass.label().into());
     }
@@ -734,6 +736,14 @@ impl App {
                 });
             }
             Command::ShowCalendar => self.open_panel(1),
+            Command::SpotifyClientId(id) => {
+                self.config.spotify_client_id = id;
+                let _ = self.config.save(&self.dir.join("config.json"));
+                // O login antigo era de outro app: começa do zero com o novo.
+                let _ = std::fs::remove_file(self.dir.join("spotify-token.json"));
+                self.refresh_settings();
+                self.set_status("✓ Client ID salvo. Agora digite: conectar spotify", false);
+            }
             Command::Timer(nocto_core::timer::TimerCmd::Start(secs)) => {
                 self.start_timer(secs);
                 self.close(false);
@@ -1004,6 +1014,14 @@ fn wire_callbacks(ui: &Island) {
             app.config.whatsapp = !app.config.whatsapp;
             let _ = app.config.save(&app.dir.join("config.json"));
             app.refresh_settings();
+        })
+    });
+    ui.on_setup_spotify(|| {
+        with_app(|app| {
+            let _ = launcher::open_url("https://developer.spotify.com/dashboard");
+            app.ui.set_settings_note(
+                "1) Create app  2) Redirect URI: http://127.0.0.1:8898/callback  3) marque Web API  4) copie o Client ID e digite na barra: spotify id <código>".into(),
+            );
         })
     });
     ui.on_toggle_autostart(|| {
@@ -1314,6 +1332,10 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         // Desenvolvimento: NOCTO_VOICE começa a ouvir logo ao abrir (com NOCTO_MODE=1).
         if std::env::var_os("NOCTO_VOICE").is_some() {
             app.ui.invoke_voice();
+        }
+        // Desenvolvimento: NOCTO_SETUP_SPOTIFY mostra o passo a passo nas Configurações.
+        if std::env::var_os("NOCTO_SETUP_SPOTIFY").is_some() {
+            app.ui.set_settings_note("1) Create app  2) Redirect URI: http://127.0.0.1:8898/callback  3) marque Web API  4) copie o Client ID e digite na barra: spotify id <código>".into());
         }
         // Desenvolvimento: NOCTO_TIMER=segundos começa um timer ao abrir.
         if let Some(secs) = std::env::var("NOCTO_TIMER").ok().and_then(|s| s.parse().ok()) {

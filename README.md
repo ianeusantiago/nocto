@@ -96,12 +96,12 @@ Não instala nada nem pede permissão de administrador. Para remover, apague o e
 
 ### Spotify: "toca X" (opcional, precisa de Premium)
 
-Play/pause/próxima funcionam sem nada disso. Para tocar por nome:
+Play/pause/próxima funcionam sem nada disso. Para tocar por nome, use **o seu próprio app do Spotify** (grátis, 5 minutos, e ninguém precisa te liberar):
 
-1. Crie um app grátis em <https://developer.spotify.com/dashboard>.
-2. Em **Redirect URIs**, adicione `http://127.0.0.1:8898/callback` e marque **Web API**.
-3. Coloque o **Client ID** em `spotify_client_id`, no `%APPDATA%\Nocto\config.json`.
-4. Na barra, digite `conectar spotify` e autorize.
+1. Nas Configurações da ilha, clique em **Spotify › Usar o meu**: abre o painel do Spotify.
+2. Crie um app. Em **Redirect URIs**, coloque `http://127.0.0.1:8898/callback` e marque **Web API**.
+3. Copie o **Client ID** e digite na barra: `spotify id <Client ID>`.
+4. Digite `conectar spotify` e autorize.
 
 ## Por dentro
 

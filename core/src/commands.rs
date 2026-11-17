@@ -12,6 +12,8 @@ pub enum Command {
     SpotifyLogin,
     ShowCalendar,
     Timer(crate::timer::TimerCmd),
+    /// "spotify id <código>": usar o próprio app do Spotify.
+    SpotifyClientId(String),
     Quit,
     Ignore,
     Unknown(String),
@@ -39,6 +41,17 @@ fn fold(s: &str) -> String {
         .collect()
 }
 
+/// O Client ID do Spotify tem 32 caracteres hexadecimais.
+fn spotify_client_id(input: &str) -> Option<String> {
+    let words: Vec<&str> = input.split_whitespace().collect();
+    let low: Vec<String> = words.iter().map(|w| w.to_lowercase()).collect();
+    if low.first().map(String::as_str) != Some("spotify") || !low.iter().any(|w| w == "id") {
+        return None;
+    }
+    let id = words.last()?.trim();
+    (id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit())).then(|| id.to_lowercase())
+}
+
 pub fn parse(input: &str) -> Command {
     let input = input.trim();
     if input.is_empty() {
@@ -60,6 +73,10 @@ pub fn parse(input: &str) -> Command {
         "sair" | "fechar nocto" | "sair do nocto" | "fecha o nocto" => return Command::Quit,
         "login spotify" | "conectar spotify" | "entrar no spotify" => return Command::SpotifyLogin,
         _ => {}
+    }
+    // "spotify id 29d3c1…" / "spotify client id …": o Client ID do app do próprio usuário.
+    if let Some(id) = spotify_client_id(input) {
+        return Command::SpotifyClientId(id);
     }
     // Antes do "toca/bota": "bota um timer de 3 minutos" é timer, não música.
     if let Some(t) = crate::timer::parse(&whole) {
@@ -186,5 +203,13 @@ mod playlist_tests {
         assert_eq!(parse("tocar minha playlist only day"), Command::SpotifyPlaylist("only day".into()));
         assert_eq!(parse("toca playlist"), Command::SpotifyPlay("playlist".into()));
         assert_eq!(parse("toca ghost town"), Command::SpotifyPlay("ghost town".into()));
+    }
+
+    #[test]
+    fn spotify_client_id_command() {
+        let id = "29d3c1690e7c4e2791e0d5f4c0e9ab9a";
+        assert_eq!(parse(&format!("spotify id {id}")), Command::SpotifyClientId(id.into()));
+        assert_eq!(parse(&format!("Spotify client ID {}", id.to_uppercase())), Command::SpotifyClientId(id.into()));
+        assert!(matches!(parse("spotify id 123"), Command::Unknown(_) | Command::OpenApp(_)));
     }
 }
