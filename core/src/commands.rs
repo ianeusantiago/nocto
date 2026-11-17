@@ -11,6 +11,7 @@ pub enum Command {
     SpotifyNext,
     SpotifyLogin,
     ShowCalendar,
+    ShowClipboard,
     Timer(crate::timer::TimerCmd),
     /// "spotify id <código>": usar o próprio app do Spotify.
     SpotifyClientId(String),
@@ -67,6 +68,9 @@ pub fn parse(input: &str) -> Command {
     let whole = whole.split_whitespace().collect::<Vec<_>>().join(" ");
 
     match whole.as_str() {
+        "copiados" | "clipboard" | "area de transferencia" | "abre a area de transferencia" | "historico de copias" => {
+            return Command::ShowClipboard;
+        }
         "agenda" | "calendario" | "abre o calendario" | "abre a agenda" | "abrir agenda" | "abrir calendario" => {
             return Command::ShowCalendar;
         }

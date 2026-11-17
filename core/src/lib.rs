@@ -1,4 +1,5 @@
 pub mod calendar;
+pub mod clip;
 pub mod commands;
 pub mod bgremove;
 pub mod imgconv;

@@ -151,3 +151,79 @@ mod decode_tests {
         assert_eq!(px.len(), 200 * 100 * 4);
     }
 }
+
+/// Imagem da área de transferência do Windows (CF_DIB: BITMAPINFOHEADER + pixels,
+/// de baixo para cima) → RGBA. Aceita 24 e 32 bits, que é o que os apps copiam.
+pub fn decode_dib(b: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    let u32_at = |o: usize| b.get(o..o + 4).map(|s| u32::from_le_bytes(s.try_into().unwrap()));
+    let header = u32_at(0)? as usize;
+    let w = u32_at(4)? as i32;
+    let h_raw = u32_at(8)? as i32;
+    let bpp = u16::from_le_bytes(b.get(14..16)?.try_into().ok()?) as usize;
+    let compression = u32_at(16)?;
+    if w <= 0 || h_raw == 0 || !(bpp == 24 || bpp == 32) || w > 16384 || h_raw.abs() > 16384 {
+        return None;
+    }
+    let (w, h) = (w as usize, h_raw.unsigned_abs() as usize);
+    // BI_BITFIELDS com cabeçalho de 40 bytes: 3 máscaras depois do cabeçalho.
+    let start = header + if compression == 3 && header == 40 { 12 } else { 0 };
+    let stride = (w * bpp / 8 + 3) & !3;
+    let px = b.get(start..start + stride * h)?;
+    let mut out = vec![0u8; w * h * 4];
+    // Alfa todo zero (comum em 32 bits) quer dizer imagem opaca.
+    let alpha_used = bpp == 32 && px.chunks(4).any(|c| c.get(3).is_some_and(|&a| a != 0));
+    for y in 0..h {
+        let src_row = if h_raw > 0 { h - 1 - y } else { y };
+        for x in 0..w {
+            let s = src_row * stride + x * bpp / 8;
+            let d = (y * w + x) * 4;
+            out[d] = px[s + 2];
+            out[d + 1] = px[s + 1];
+            out[d + 2] = px[s];
+            out[d + 3] = if alpha_used { px[s + 3] } else { 255 };
+        }
+    }
+    Some((w as u32, h as u32, out))
+}
+
+/// RGBA → CF_DIB de 32 bits (para copiar uma imagem de volta).
+pub fn encode_dib(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(40 + rgba.len());
+    for v in [40u32, w, h] {
+        out.extend(v.to_le_bytes());
+    }
+    out.extend(1u16.to_le_bytes());
+    out.extend(32u16.to_le_bytes());
+    out.extend(0u32.to_le_bytes());
+    out.extend((w * h * 4).to_le_bytes());
+    out.extend([0u8; 16]);
+    for y in (0..h as usize).rev() {
+        for x in 0..w as usize {
+            let s = (y * w as usize + x) * 4;
+            out.extend([rgba[s + 2], rgba[s + 1], rgba[s], rgba[s + 3]]);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod dib_tests {
+    #[test]
+    fn dib_roundtrip() {
+        let rgba = vec![10, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 1, 2, 3, 255];
+        let dib = super::encode_dib(2, 2, &rgba);
+        assert_eq!(super::decode_dib(&dib), Some((2, 2, rgba)));
+    }
+}
+
+/// Encolhe RGBA para caber em `max` px no lado maior (para miniaturas e preview).
+pub fn downscale_rgba(w: u32, h: u32, rgba: &[u8], max: u32) -> (u32, u32, Vec<u8>) {
+    if w.max(h) <= max {
+        return (w, h, rgba.to_vec());
+    }
+    let Some(img) = image::RgbaImage::from_raw(w, h, rgba.to_vec()) else { return (w, h, rgba.to_vec()) };
+    let scale = max as f32 / w.max(h) as f32;
+    let (nw, nh) = (((w as f32 * scale) as u32).max(1), ((h as f32 * scale) as u32).max(1));
+    let small = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
+    (nw, nh, small.into_raw())
+}

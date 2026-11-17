@@ -17,3 +17,7 @@ Tudo gratuito, sem serviço pago. Ordem definida pelo autor: **A, D, E, B, C**, 
 | K | **Testar em PC fraco / Windows 10** | Notebook do amigo. | |
 | L | **Testar arrastar arquivo de verdade** | Converter imagem soltando na ilha. | Nunca testado com arraste real. |
 | M ✅ | **Logo do Nocto** | Ícone do app, do executável e do README. | Uma das últimas. |
+| N | **Área de transferência** | Página com o que foi copiado (texto, link, código colorido, imagem, cor, arquivo) e preview que adapta o tamanho da ilha. | Em andamento. |
+| O | **Modo karaokê** | Botão de microfone na página de música abre a letra sincronizada passando na tela, de um jeito divertido. | Próximo, depois da N. |
+| P | **Tocar álbum** | `toca álbum Late Registration by Kanye West` toca o álbum inteiro. | Depois do karaokê. |
+| Q | **Fila do Spotify** | `coloca na fila <música>` põe a música na fila; a próxima que tocar é ela. | Junto com álbuns. |

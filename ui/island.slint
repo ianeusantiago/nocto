@@ -16,6 +16,27 @@ export struct WaMsg {
     time: string,
 }
 
+export struct CodeSpan {
+    text: string,
+    color: color,
+}
+
+export struct CodeLine {
+    spans: [CodeSpan],
+}
+
+export struct ClipCard {
+    kind: string,
+    icon: string,
+    summary: string,
+    age: string,
+    pinned: bool,
+    is-image: bool,
+    thumb: image,
+    is-color: bool,
+    swatch: color,
+}
+
 export struct Item {
     time: string,
     title: string,
@@ -286,6 +307,30 @@ export component Island inherits Window {
     in property <int> mode: 0;
     in property <color> glass: #0b2a44b3;
     in property <bool> solid;
+    // Área de transferência.
+    in property <[ClipCard]> clips;
+    in property <int> clip-open: -1;
+    // 0 texto curto, 1 texto grande, 2 código, 3 imagem, 4 arquivo, 5 link, 6 cor
+    in property <int> clip-view;
+    in property <string> clip-meta;
+    in property <string> clip-text;
+    in property <image> clip-image;
+    in property <[CodeLine]> clip-code;
+    in property <int> clip-code-cols;
+    in property <color> clip-swatch;
+    in property <bool> clip-pinned;
+    in property <bool> clip-can-open;
+    callback clip-select(int);
+    callback clip-back();
+    callback clip-copy();
+    callback clip-open-item();
+    callback clip-pin();
+    callback clip-delete();
+    callback clip-clear();
+    // "Copiado" rapidinho na pílula.
+    in property <string> pill-flash;
+    in property <bool> clip-flash-on;
+    callback toggle-clip-flash();
     // Miniatura da imagem solta (e do resultado, depois de converter / tirar o fundo).
     in property <image> drop-preview;
     in property <bool> has-drop-preview;
@@ -458,8 +503,17 @@ export component Island inherits Window {
             TouchArea {
                 clicked => { root.expand(); }
             }
+            // Acabou de copiar algo: "Copiado" e o começo do que foi.
+            if root.pill-flash != "": HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 16px;
+                spacing: 9px;
+                Glyph { text: "\u{E73E}"; color: root.accent; font-size: 14px; }
+                Text { text: "Copiado"; color: root.ink; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+                Text { text: root.pill-flash; color: root.ink.with-alpha(0.6); font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+            }
             // Timer: anel que esvazia + tempo restante.
-            if root.timer-on: HorizontalLayout {
+            if root.timer-on && root.pill-flash == "": HorizontalLayout {
                 padding-left: 12px;
                 padding-right: 16px;
                 spacing: 10px;
@@ -514,7 +568,7 @@ export component Island inherits Window {
                     horizontal-stretch: 1;
                 }
             }
-            if !root.timer-on: HorizontalLayout {
+            if !root.timer-on && root.pill-flash == "": HorizontalLayout {
                 padding-left: 14px;
                 padding-right: 10px;
                 spacing: 10px;
@@ -740,7 +794,7 @@ export component Island inherits Window {
                     return accept;
                 }
                 if (event.text == Key.RightArrow) {
-                    root.go-page(min(3, root.page + 1));
+                    root.go-page(min(4, root.page + 1));
                     return accept;
                 }
                 reject
@@ -754,7 +808,7 @@ export component Island inherits Window {
                     }
                     if (e.kind == PointerEventKind.up) {
                         if (self.mouse-x - self.start-x < -60px) {
-                            root.go-page(min(3, root.page + 1));
+                            root.go-page(min(4, root.page + 1));
                         } else if (self.mouse-x - self.start-x > 60px) {
                             root.go-page(max(0, root.page - 1));
                         }
@@ -762,7 +816,7 @@ export component Island inherits Window {
                 }
                 scroll-event(e) => {
                     if (e.delta-y < 0 || e.delta-x < 0) {
-                        root.go-page(min(3, root.page + 1));
+                        root.go-page(min(4, root.page + 1));
                     } else if (e.delta-y > 0 || e.delta-x > 0) {
                         root.go-page(max(0, root.page - 1));
                     }
@@ -771,14 +825,14 @@ export component Island inherits Window {
                 Rectangle {
                     x: -root.page * parent.width;
                     y: 0;
-                    width: parent.width * 4;
+                    width: parent.width * 5;
                     height: parent.height;
                     animate x { duration: root.slide ? 380ms : 0ms; easing: cubic-bezier(0.25, 1.1, 0.32, 1); }
                     // Página 1: música (capa, nome, artista, tempo e controles).
                     Rectangle {
                         x: 0;
                         y: 0;
-                        width: parent.width / 4;
+                        width: parent.width / 5;
                         height: 214px;
                         HorizontalLayout {
                             padding: 22px;
@@ -923,9 +977,9 @@ export component Island inherits Window {
                     }
                     // Página 2: calendário.
                     Rectangle {
-                        x: parent.width / 4;
+                        x: parent.width / 5;
                         y: 0;
-                        width: parent.width / 4;
+                        width: parent.width / 5;
                         height: 340px;
                     HorizontalLayout {
                         padding: 18px;
@@ -1119,9 +1173,9 @@ export component Island inherits Window {
                     }
                     // Página 3: mensagens (WhatsApp e e-mail, trocando pela aba de cima).
                     Rectangle {
-                        x: parent.width * 2 / 4;
+                        x: parent.width * 2 / 5;
                         y: 0;
-                        width: parent.width / 4;
+                        width: parent.width / 5;
                         height: 340px;
                         VerticalLayout {
                             padding: 22px;
@@ -1203,12 +1257,177 @@ export component Island inherits Window {
                             Rectangle { vertical-stretch: 1; }
                         }
                     }
-                    // Página 4: configurações e apps do "abre".
+                    // Página 4: área de transferência (cartões e preview que adapta a ilha).
                     Rectangle {
-                        x: parent.width * 3 / 4;
+                        x: parent.width * 3 / 5;
                         y: 0;
-                        width: parent.width / 4;
-                        height: 620px;
+                        width: parent.width / 5;
+                        height: 520px;
+                        // ── Lista de cartões ──
+                        if root.clip-open < 0: VerticalLayout {
+                            padding: 22px;
+                            padding-top: 30px;
+                            spacing: 12px;
+                            HorizontalLayout {
+                                height: 26px;
+                                spacing: 10px;
+                                Glyph { text: "\u{E77F}"; color: root.accent; font-size: 16px; }
+                                Text { text: "Área de transferência"; color: root.ink; font-size: 17px; font-weight: 600; vertical-alignment: center; }
+                                Text { text: root.clips.length > 0 ? "clique para ver" : ""; color: root.ink.with-alpha(0.5); font-size: 12px; vertical-alignment: center; horizontal-alignment: right; horizontal-stretch: 1; }
+                                if root.clips.length > 0: TouchArea {
+                                    width: 54px;
+                                    mouse-cursor: pointer;
+                                    clicked => { root.clip-clear(); }
+                                    Text { text: "Limpar"; color: root.accent; font-size: 12px; vertical-alignment: center; horizontal-alignment: right; }
+                                }
+                            }
+                            if root.clips.length == 0: Text {
+                                text: "Copie algo (Ctrl + C) e aparece aqui. Fixe com o alfinete para guardar.";
+                                color: root.ink.with-alpha(0.55);
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+                            if root.clips.length > 0: Flickable {
+                                property <length> card-w: (self.width - 20px) / 3;
+                                content-height: ceil(root.clips.length / 3) * 96px;
+                                for c[i] in root.clips: Rectangle {
+                                    x: mod(i, 3) * (parent.card-w + 10px);
+                                    y: floor(i / 3) * 96px;
+                                    width: parent.card-w;
+                                    height: 86px;
+                                    border-radius: 12px;
+                                    background: card-touch.has-hover ? root.ink.with-alpha(0.13) : root.ink.with-alpha(0.07);
+                                    border-width: c.pinned ? 1px : 0;
+                                    border-color: root.accent;
+                                    card-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.clip-select(i); }
+                                    }
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        spacing: 6px;
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            height: 14px;
+                                            Glyph { text: c.icon; color: root.ink.with-alpha(0.6); font-size: 11px; }
+                                            Text { text: c.kind + " · " + c.age; color: root.ink.with-alpha(0.55); font-size: 11px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                                            if c.pinned: Glyph { text: "\u{E718}"; color: root.accent; font-size: 11px; }
+                                        }
+                                        if c.is-image: Image {
+                                            source: c.thumb;
+                                            image-fit: ImageFit.cover;
+                                            height: 44px;
+                                        }
+                                        if c.is-color: HorizontalLayout {
+                                            spacing: 8px;
+                                            Rectangle { width: 22px; height: 22px; border-radius: 6px; background: c.swatch; }
+                                            Text { text: c.summary; color: root.ink; font-size: 13px; vertical-alignment: center; }
+                                        }
+                                        if !c.is-image && !c.is-color: Text {
+                                            text: c.summary;
+                                            color: c.kind == "Link" ? root.accent : root.ink;
+                                            font-size: 12px;
+                                            wrap: word-wrap;
+                                            overflow: elide;
+                                            vertical-stretch: 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // ── Preview do item escolhido ──
+                        if root.clip-open >= 0: VerticalLayout {
+                            padding: 22px;
+                            padding-top: 30px;
+                            spacing: 12px;
+                            HorizontalLayout {
+                                height: 30px;
+                                spacing: 8px;
+                                IconButton { icon: Icons.left; ink: root.ink; clicked => { root.clip-back(); } }
+                                Text { text: root.clip-meta; color: root.ink.with-alpha(0.7); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                                Chip { text: "Copiar"; ink: root.ink; accent: root.accent; clicked => { root.clip-copy(); } }
+                                if root.clip-can-open: Chip { text: "Abrir"; ink: root.ink; accent: root.accent; clicked => { root.clip-open-item(); } }
+                                Chip { text: root.clip-pinned ? "Desafixar" : "Fixar"; ink: root.ink; accent: root.accent; clicked => { root.clip-pin(); } }
+                                IconButton { icon: "\u{E74D}"; ink: root.ink; clicked => { root.clip-delete(); } }
+                            }
+                            // Texto curto, link ou arquivo.
+                            if root.clip-view == 0 || root.clip-view == 4 || root.clip-view == 5: Text {
+                                text: root.clip-text;
+                                color: root.clip-view == 5 ? root.accent : root.ink;
+                                font-size: root.clip-view == 0 ? 16px : 14px;
+                                wrap: word-wrap;
+                                vertical-stretch: 1;
+                            }
+                            // Texto grande: rola.
+                            if root.clip-view == 1: Flickable {
+                                vertical-stretch: 1;
+                                content-height: long-text.preferred-height + 10px;
+                                long-text := Text {
+                                    width: parent.width - 8px;
+                                    text: root.clip-text;
+                                    color: root.ink;
+                                    font-size: 14px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            // Código: cores do VS Code, rola nos dois sentidos.
+                            if root.clip-view == 2: Rectangle {
+                                vertical-stretch: 1;
+                                border-radius: 12px;
+                                background: #1e1e1ef0;
+                                clip: true;
+                                Flickable {
+                                    x: 14px;
+                                    y: 10px;
+                                    width: parent.width - 28px;
+                                    height: parent.height - 20px;
+                                    content-height: root.clip-code.length * 18px + 4px;
+                                    content-width: max(self.width, root.clip-code-cols * 7.2px + 10px);
+                                    for line[li] in root.clip-code: HorizontalLayout {
+                                        y: li * 18px;
+                                        height: 18px;
+                                        alignment: start;
+                                        spacing: 0;
+                                        for span in line.spans: Text {
+                                            text: span.text;
+                                            color: span.color;
+                                            font-family: "Consolas";
+                                            font-size: 12.5px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                            // Imagem.
+                            if root.clip-view == 3: Rectangle {
+                                vertical-stretch: 1;
+                                min-height: 0;
+                                preferred-height: 0;
+                                border-radius: 12px;
+                                clip: true;
+                                background: #00000040;
+                                Image {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    source: root.clip-image;
+                                    image-fit: contain;
+                                }
+                            }
+                            // Cor.
+                            if root.clip-view == 6: HorizontalLayout {
+                                spacing: 18px;
+                                vertical-stretch: 1;
+                                Rectangle { width: 120px; height: 120px; border-radius: 22px; background: root.clip-swatch; border-width: 1px; border-color: root.ink.with-alpha(0.2); }
+                                Text { text: root.clip-text; color: root.ink; font-size: 18px; font-weight: 600; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                    // Página 5: configurações e apps do "abre".
+                    Rectangle {
+                        x: parent.width * 4 / 5;
+                        y: 0;
+                        width: parent.width / 5;
+                        height: 660px;
                         HorizontalLayout {
                             padding: 20px;
                             padding-top: 32px;
@@ -1261,6 +1480,11 @@ export component Island inherits Window {
                                     height: 30px;
                                     Text { text: root.spotify-own ? "Spotify: seu próprio app ✓" : "Spotify: app do Nocto"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
                                     Chip { text: root.spotify-own ? "Trocar" : "Usar o meu"; ink: root.ink; accent: root.accent; clicked => { root.setup-spotify(); } }
+                                }
+                                HorizontalLayout {
+                                    height: 30px;
+                                    Text { text: "Avisar ao copiar"; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                    Switch { y: 4px; on: root.clip-flash-on; ink: root.ink; accent: root.accent; toggled => { root.toggle-clip-flash(); } }
                                 }
                                 HorizontalLayout {
                                     height: 30px;
@@ -1371,7 +1595,7 @@ export component Island inherits Window {
                 height: 8px;
                 alignment: center;
                 spacing: 8px;
-                for i in 4: Rectangle {
+                for i in 5: Rectangle {
                     width: root.page == i ? 18px : 7px;
                     height: 7px;
                     border-radius: 3.5px;

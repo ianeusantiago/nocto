@@ -189,6 +189,8 @@ pub struct Config {
     pub glass: GlassMode,
     /// Abrir o Nocto junto com o Windows.
     pub autostart: bool,
+    /// Mostrar "Copiado" na pílula ao copiar algo.
+    pub clip_flash: bool,
 }
 
 impl Default for Config {
@@ -205,6 +207,7 @@ impl Default for Config {
             open_page: OpenPage::Auto,
             glass: GlassMode::Liquid,
             autostart: true,
+            clip_flash: true,
         }
     }
 }

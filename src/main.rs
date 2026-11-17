@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod clipboard;
 mod glass;
 mod media;
 mod notify;
@@ -13,7 +14,7 @@ use nocto_core::commands::{self, Command};
 use nocto_core::config::{self, CompactMode, Config};
 use nocto_core::imgconv::{self, Format};
 use nocto_core::launcher::{self, Allowlist};
-use nocto_core::{format, keys, spotify, theme};
+use nocto_core::{clip, format, keys, spotify, theme};
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
 use slint::{Color, ComponentHandle, ModelRc, VecModel};
 use std::cell::RefCell;
@@ -67,6 +68,10 @@ struct App {
     volume: volume::Volume,
     /// Conta os avisos para cada um fechar só a si mesmo.
     notify_serial: u64,
+    /// Histórico da área de transferência (mais novo primeiro) e o item aberto no preview.
+    clips: Vec<Clip>,
+    clip_open: Option<usize>,
+    clip_serial: u64,
     /// Timer da pílula: quando acaba, quanto durava e o tique de 1 s.
     timer_end: Option<std::time::Instant>,
     timer_total: u32,
@@ -88,7 +93,7 @@ struct App {
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
 const WINDOW_W: f32 = 720.0;
-const WINDOW_H: f32 = 640.0;
+const WINDOW_H: f32 = 680.0;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -189,13 +194,15 @@ impl App {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
             CALENDAR if self.page == 0 => (680.0, 214.0, 40.0),
-            CALENDAR if self.page == 3 => (680.0, 620.0, 40.0),
+            CALENDAR if self.page == 4 => (680.0, 660.0, 40.0),
+            CALENDAR if self.page == 3 => (680.0, self.clip_height(), 40.0),
             NOTIFY => (440.0, 64.0, 32.0),
             CALENDAR => (680.0, 340.0, 40.0),
             DROP if self.ui.get_has_drop_preview() => (580.0, 150.0, 40.0),
             DROP => (440.0, 128.0, 36.0),
             // Escondida: encolhe até um risquinho no topo antes de sumir (e cresce dele ao voltar).
             PILL if self.pill_hidden() => (90.0, 0.0, 0.0),
+            _ if !ui.get_pill_flash().is_empty() => (320.0, 36.0, 18.0),
             _ if ui.get_timer_on() => (210.0, 36.0, 18.0),
             _ if ui.get_show_music() => (360.0, 38.0, 19.0),
             _ => (230.0, 34.0, 17.0),
@@ -264,6 +271,9 @@ impl App {
             self.mark_read();
         }
         if page == 3 {
+            self.refresh_clips();
+        }
+        if page == 4 {
             self.refresh_settings();
         }
         self.layout();
@@ -379,6 +389,212 @@ impl App {
         });
     }
 
+    // ───────── Área de transferência ─────────
+
+    /// Altura da ilha na página de cópias: cresce com o conteúdo, como a Dynamic Island.
+    fn clip_height(&self) -> f32 {
+        let Some(i) = self.clip_open else {
+            let rows = self.clips.len().div_ceil(3).clamp(1, 3) as f32;
+            return if self.clips.is_empty() { 200.0 } else { 120.0 + rows * 96.0 };
+        };
+        let Some(c) = self.clips.get(i) else { return 220.0 };
+        match &c.data {
+            clipboard::Data::Image(w, h, _) => {
+                let shown = (640.0 * *h as f32 / (*w).max(1) as f32).clamp(160.0, 420.0);
+                shown + 130.0
+            }
+            clipboard::Data::Files(f) => (150.0 + f.len().min(8) as f32 * 20.0).min(360.0),
+            clipboard::Data::Text(t) => match c.kind {
+                clip::Kind::Code => (132.0 + t.lines().count().min(20) as f32 * 18.0).max(240.0),
+                clip::Kind::Color => 250.0,
+                clip::Kind::Link => 200.0,
+                _ if t.len() > 280 || t.lines().count() > 5 => 460.0,
+                _ => (170.0 + (t.len() as f32 / 70.0).ceil() * 22.0).min(300.0),
+            },
+        }
+    }
+
+    /// Algo foi copiado: entra no topo da lista (sem repetir) e a pílula avisa.
+    fn add_clip(&mut self, data: clipboard::Data) {
+        let kind = match &data {
+            clipboard::Data::Text(t) => clip::classify_text(t),
+            clipboard::Data::Files(_) => clip::Kind::File,
+            clipboard::Data::Image(..) => clip::Kind::Image,
+        };
+        let same = |c: &Clip| match (&c.data, &data) {
+            (clipboard::Data::Text(a), clipboard::Data::Text(b)) => a == b,
+            (clipboard::Data::Files(a), clipboard::Data::Files(b)) => a == b,
+            (clipboard::Data::Image(aw, ah, a), clipboard::Data::Image(bw, bh, b)) => aw == bw && ah == bh && a == b,
+            _ => false,
+        };
+        let mut pinned = false;
+        if let Some(pos) = self.clips.iter().position(same) {
+            pinned = self.clips.remove(pos).pinned;
+        }
+        let thumb = match &data {
+            clipboard::Data::Image(w, h, px) => {
+                let (tw, th, t) = imgconv::downscale_rgba(*w, *h, px, 900);
+                Some(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&t, tw, th)))
+            }
+            _ => None,
+        };
+        let flash = match &data {
+            clipboard::Data::Text(t) => clip::summary(t),
+            clipboard::Data::Files(f) => f.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            clipboard::Data::Image(w, h, _) => format!("imagem {w}×{h}"),
+        };
+        self.clips.insert(0, Clip { data, kind, at: std::time::SystemTime::now(), pinned, thumb });
+        // Guarda os 20 mais novos; os fixados não saem.
+        let mut kept = 0;
+        self.clips.retain(|c| {
+            kept += 1;
+            c.pinned || kept <= 20
+        });
+        self.clip_open = None;
+        if self.ui.get_mode() == CALENDAR && self.page == 3 {
+            self.refresh_clips();
+            self.layout();
+        }
+        if self.config.clip_flash && self.ui.get_mode() == PILL && !self.hidden.get() {
+            self.ui.set_pill_flash(if flash.is_empty() { " ".into() } else { flash.into() });
+            self.layout();
+            self.clip_serial += 1;
+            let serial = self.clip_serial;
+            slint::Timer::single_shot(Duration::from_millis(1400), move || {
+                with_app(move |app| {
+                    if app.clip_serial == serial {
+                        app.ui.set_pill_flash("".into());
+                        if app.ui.get_mode() == PILL {
+                            app.layout();
+                        }
+                    }
+                })
+            });
+        }
+    }
+
+    fn refresh_clips(&mut self) {
+        let now = std::time::SystemTime::now();
+        let cards: Vec<ClipCard> = self
+            .clips
+            .iter()
+            .map(|c| {
+                let secs = now.duration_since(c.at).map(|d| d.as_secs()).unwrap_or(0);
+                let (summary, swatch) = match &c.data {
+                    clipboard::Data::Text(t) => {
+                        let sw = clip::parse_color(t).map(|(r, g, b)| Color::from_rgb_u8(r, g, b)).unwrap_or_default();
+                        (clip::summary(t), sw)
+                    }
+                    clipboard::Data::Files(f) => {
+                        let first = f.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        (if f.len() > 1 { format!("{first} +{}", f.len() - 1) } else { first }, Color::default())
+                    }
+                    clipboard::Data::Image(w, h, _) => (format!("{w}×{h}"), Color::default()),
+                };
+                ClipCard {
+                    kind: c.kind.label().into(),
+                    icon: clip_icon(c.kind).into(),
+                    summary: summary.into(),
+                    age: clip::age(secs).into(),
+                    pinned: c.pinned,
+                    is_image: c.thumb.is_some(),
+                    thumb: c.thumb.clone().unwrap_or_default(),
+                    is_color: c.kind == clip::Kind::Color,
+                    swatch,
+                }
+            })
+            .collect();
+        self.ui.set_clips(ModelRc::new(VecModel::from(cards)));
+        self.ui.set_clip_open(self.clip_open.map(|i| i as i32).unwrap_or(-1));
+    }
+
+    /// Abre o preview de um cartão; a ilha muda de tamanho conforme o conteúdo.
+    fn open_clip(&mut self, i: usize) {
+        let Some(c) = self.clips.get(i) else { return };
+        let secs = std::time::SystemTime::now().duration_since(c.at).map(|d| d.as_secs()).unwrap_or(0);
+        let mut meta = format!("{} · {}", c.kind.label(), clip::age(secs));
+        let mut can_open = false;
+        let view = match &c.data {
+            clipboard::Data::Image(w, h, _) => {
+                self.ui.set_clip_image(c.thumb.clone().unwrap_or_default());
+                meta = format!("{meta} · {w}×{h}");
+                3
+            }
+            clipboard::Data::Files(f) => {
+                let list: Vec<String> = f.iter().map(|p| p.display().to_string()).collect();
+                self.ui.set_clip_text(list.join("\n").into());
+                can_open = true;
+                4
+            }
+            clipboard::Data::Text(t) => match c.kind {
+                clip::Kind::Code => {
+                    let lines = clip::highlight(t, 400);
+                    let cols = lines.iter().map(|l| l.iter().map(|s| s.0.chars().count()).sum::<usize>()).max().unwrap_or(0);
+                    let model: Vec<CodeLine> = lines
+                        .into_iter()
+                        .map(|l| CodeLine {
+                            spans: ModelRc::new(VecModel::from(
+                                l.into_iter()
+                                    .map(|(text, tok)| {
+                                        let (r, g, b) = tok.rgb();
+                                        CodeSpan { text: text.into(), color: Color::from_rgb_u8(r, g, b) }
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )),
+                        })
+                        .collect();
+                    self.ui.set_clip_code(ModelRc::new(VecModel::from(model)));
+                    self.ui.set_clip_code_cols(cols as i32);
+                    meta = format!("{meta} · {} linhas", t.lines().count());
+                    2
+                }
+                clip::Kind::Link => {
+                    self.ui.set_clip_text(t.trim().into());
+                    can_open = true;
+                    5
+                }
+                clip::Kind::Color => {
+                    if let Some((r, g, b)) = clip::parse_color(t) {
+                        self.ui.set_clip_swatch(Color::from_rgb_u8(r, g, b));
+                        self.ui.set_clip_text(format!("{}\nrgb({r}, {g}, {b})", t.trim()).into());
+                    }
+                    6
+                }
+                _ => {
+                    self.ui.set_clip_text(t.as_str().into());
+                    if t.len() > 280 || t.lines().count() > 5 { 1 } else { 0 }
+                }
+            },
+        };
+        self.ui.set_clip_view(view);
+        self.ui.set_clip_meta(meta.into());
+        self.ui.set_clip_pinned(c.pinned);
+        self.ui.set_clip_can_open(can_open);
+        self.clip_open = Some(i);
+        self.ui.set_clip_open(i as i32);
+        self.layout();
+    }
+
+    fn close_clip(&mut self) {
+        self.clip_open = None;
+        self.refresh_clips();
+        self.layout();
+    }
+
+    fn save_pinned_clips(&self) {
+        let items: Vec<serde_json::Value> = self
+            .clips
+            .iter()
+            .filter(|c| c.pinned)
+            .filter_map(|c| match &c.data {
+                clipboard::Data::Text(t) => Some(serde_json::json!({ "text": t })),
+                clipboard::Data::Files(f) => Some(serde_json::json!({ "files": f })),
+                clipboard::Data::Image(..) => None,
+            })
+            .collect();
+        let _ = std::fs::write(self.dir.join("clipboard.json"), serde_json::to_vec_pretty(&items).unwrap_or_default());
+    }
+
     /// Zera o "não lido" da aba de mensagens que está na tela.
     fn mark_read(&self) {
         if self.ui.get_msg_tab() == 1 {
@@ -423,6 +639,7 @@ impl App {
         self.ui.set_whatsapp_preview(self.config.whatsapp_preview);
         self.ui.set_wake_on(self.config.wake_word);
         self.ui.set_autostart_on(self.config.autostart);
+        self.ui.set_clip_flash_on(self.config.clip_flash);
         let own = !self.config.spotify_client_id.is_empty() && self.config.spotify_client_id != DEFAULT_SPOTIFY_CLIENT_ID;
         self.ui.set_spotify_own(own);
         self.ui.set_open_page_label(self.config.open_page.label().into());
@@ -448,8 +665,8 @@ impl App {
     /// Mostra a página de configurações (abre o painel se estiver fechado).
     fn show_settings(&mut self) {
         self.ui.set_slide(self.ui.get_mode() == CALENDAR);
-        self.page = 3;
-        self.ui.set_page(3);
+        self.page = 4;
+        self.ui.set_page(4);
         self.refresh_settings();
         if self.ui.get_mode() == CALENDAR {
             self.layout();
@@ -485,6 +702,9 @@ impl App {
                 self.ui.set_msg_tab(0);
             }
             self.mark_read();
+        }
+        if page == 3 {
+            self.refresh_clips();
         }
         self.ui.set_settings_note("".into());
         self.apply_theme();
@@ -736,6 +956,7 @@ impl App {
                 });
             }
             Command::ShowCalendar => self.open_panel(1),
+            Command::ShowClipboard => self.open_panel(3),
             Command::SpotifyClientId(id) => {
                 self.config.spotify_client_id = id;
                 let _ = self.config.save(&self.dir.join("config.json"));
@@ -898,6 +1119,49 @@ impl App {
     }
 }
 
+/// Um item da área de transferência.
+struct Clip {
+    data: clipboard::Data,
+    kind: clip::Kind,
+    at: std::time::SystemTime,
+    pinned: bool,
+    /// Imagem já reduzida para o cartão e o preview.
+    thumb: Option<slint::Image>,
+}
+
+fn clip_icon(kind: clip::Kind) -> &'static str {
+    match kind {
+        clip::Kind::Text => "\u{E8A5}",
+        clip::Kind::Link => "\u{E71B}",
+        clip::Kind::Code => "\u{E943}",
+        clip::Kind::Color => "\u{E790}",
+        clip::Kind::Image => "\u{EB9F}",
+        clip::Kind::File => "\u{E8B7}",
+    }
+}
+
+/// Itens fixados que sobrevivem ao reiniciar (texto e arquivos).
+fn load_pinned_clips(dir: &std::path::Path) -> Vec<Clip> {
+    let Ok(text) = std::fs::read_to_string(dir.join("clipboard.json")) else { return Vec::new() };
+    let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(&text) else { return Vec::new() };
+    items
+        .into_iter()
+        .filter_map(|v| {
+            let data = if let Some(t) = v["text"].as_str() {
+                clipboard::Data::Text(t.to_string())
+            } else {
+                let files: Vec<PathBuf> = v["files"].as_array()?.iter().filter_map(|f| f.as_str().map(PathBuf::from)).collect();
+                clipboard::Data::Files(files)
+            };
+            let kind = match &data {
+                clipboard::Data::Text(t) => clip::classify_text(t),
+                _ => clip::Kind::File,
+            };
+            Some(Clip { data, kind, at: std::time::SystemTime::now(), pinned: true, thumb: None })
+        })
+        .collect()
+}
+
 fn data_dir() -> PathBuf {
     // Pasta pedida ao próprio Windows (não à variável APPDATA, que pode faltar quando o
     // Nocto abre junto com o computador); a variável fica só de reserva.
@@ -1022,6 +1286,67 @@ fn wire_callbacks(ui: &Island) {
             app.ui.set_settings_note(
                 "1) Create app  2) Redirect URI: http://127.0.0.1:8898/callback  3) marque Web API  4) copie o Client ID e digite na barra: spotify id <código>".into(),
             );
+        })
+    });
+    ui.on_clip_select(|i| with_app(move |app| app.open_clip(i as usize)));
+    ui.on_clip_back(|| with_app(|app| app.close_clip()));
+    ui.on_clip_copy(|| {
+        with_app(|app| {
+            let Some(c) = app.clip_open.and_then(|i| app.clips.get(i)) else { return };
+            if clipboard::copy(&c.data) {
+                app.ui.set_clip_meta("✓ Copiado. Cole com Ctrl + V".into());
+            }
+        })
+    });
+    ui.on_clip_open_item(|| {
+        with_app(|app| {
+            let Some(c) = app.clip_open.and_then(|i| app.clips.get(i)) else { return };
+            match &c.data {
+                clipboard::Data::Files(f) => {
+                    if let Some(p) = f.first() {
+                        let _ = launcher::open_url(&p.to_string_lossy());
+                    }
+                }
+                clipboard::Data::Text(t) => {
+                    let t = t.trim();
+                    let url = if t.starts_with("www.") { format!("https://{t}") } else { t.to_string() };
+                    let _ = launcher::open_url(&url);
+                }
+                _ => {}
+            }
+        })
+    });
+    ui.on_clip_pin(|| {
+        with_app(|app| {
+            let Some(i) = app.clip_open else { return };
+            if let Some(c) = app.clips.get_mut(i) {
+                c.pinned = !c.pinned;
+                app.ui.set_clip_pinned(c.pinned);
+            }
+            app.save_pinned_clips();
+        })
+    });
+    ui.on_clip_delete(|| {
+        with_app(|app| {
+            let Some(i) = app.clip_open else { return };
+            if i < app.clips.len() {
+                app.clips.remove(i);
+            }
+            app.save_pinned_clips();
+            app.close_clip();
+        })
+    });
+    ui.on_clip_clear(|| {
+        with_app(|app| {
+            app.clips.retain(|c| c.pinned);
+            app.close_clip();
+        })
+    });
+    ui.on_toggle_clip_flash(|| {
+        with_app(|app| {
+            app.config.clip_flash = !app.config.clip_flash;
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.refresh_settings();
         })
     });
     ui.on_toggle_autostart(|| {
@@ -1276,6 +1601,9 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         pill_note: String::new(),
         volume: volume::Volume::new(),
         notify_serial: 0,
+        clips: load_pinned_clips(&dir),
+        clip_open: None,
+        clip_serial: 0,
         timer_end: None,
         timer_total: 0,
         timer_tick: slint::Timer::default(),
@@ -1302,6 +1630,17 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         Err(e) => e,
     };
     ui.set_notice(notice.clone().into());
+    // Alt + Shift + V: direto na área de transferência.
+    if let Ok(hk) = keys::parse_hotkey("alt+shift+v") {
+        let _ = win::spawn_hotkey(hk, || {
+            on_ui(|app| {
+                app.close_clip();
+                app.open_panel(3);
+            })
+        });
+    }
+    // O que for copiado entra no histórico.
+    clipboard::watch(|data| on_ui(move |app| app.add_clip(data)));
     with_app(move |app| {
         if notice.starts_with("Atalho") || !notice.starts_with("Nocto") {
             app.pill_note = notice;
@@ -1336,6 +1675,10 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         // Desenvolvimento: NOCTO_SETUP_SPOTIFY mostra o passo a passo nas Configurações.
         if std::env::var_os("NOCTO_SETUP_SPOTIFY").is_some() {
             app.ui.set_settings_note("1) Create app  2) Redirect URI: http://127.0.0.1:8898/callback  3) marque Web API  4) copie o Client ID e digite na barra: spotify id <código>".into());
+        }
+        // Desenvolvimento: NOCTO_CLIP_OPEN=i abre o preview do item i depois de 4 s.
+        if let Some(i) = std::env::var("NOCTO_CLIP_OPEN").ok().and_then(|s| s.parse::<usize>().ok()) {
+            slint::Timer::single_shot(Duration::from_secs(8), move || with_app(move |app| app.open_clip(i)));
         }
         // Desenvolvimento: NOCTO_TIMER=segundos começa um timer ao abrir.
         if let Some(secs) = std::env::var("NOCTO_TIMER").ok().and_then(|s| s.parse().ok()) {
