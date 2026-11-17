@@ -11,6 +11,7 @@ pub enum Command {
     SpotifyNext,
     SpotifyLogin,
     ShowCalendar,
+    Timer(crate::timer::TimerCmd),
     Quit,
     Ignore,
     Unknown(String),
@@ -59,6 +60,10 @@ pub fn parse(input: &str) -> Command {
         "sair" | "fechar nocto" | "sair do nocto" | "fecha o nocto" => return Command::Quit,
         "login spotify" | "conectar spotify" | "entrar no spotify" => return Command::SpotifyLogin,
         _ => {}
+    }
+    // Antes do "toca/bota": "bota um timer de 3 minutos" é timer, não música.
+    if let Some(t) = crate::timer::parse(&whole) {
+        return Command::Timer(t);
     }
 
     if rest.is_empty() {

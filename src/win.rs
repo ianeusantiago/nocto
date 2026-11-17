@@ -204,6 +204,13 @@ pub fn roaming_appdata() -> Option<std::path::PathBuf> {
     }
 }
 
+/// Som de aviso do Windows (o mesmo das notificações).
+pub fn alert_sound() {
+    unsafe {
+        let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(MB_ICONASTERISK);
+    }
+}
+
 pub fn foreground() -> isize {
     unsafe { GetForegroundWindow().0 as isize }
 }

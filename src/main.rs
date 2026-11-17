@@ -67,6 +67,10 @@ struct App {
     volume: volume::Volume,
     /// Conta os avisos para cada um fechar só a si mesmo.
     notify_serial: u64,
+    /// Timer da pílula: quando acaba, quanto durava e o tique de 1 s.
+    timer_end: Option<std::time::Instant>,
+    timer_total: u32,
+    timer_tick: slint::Timer,
     /// Escuta do "Nocto" (None = desligada).
     wake: Option<wake::Wake>,
     wake_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -192,6 +196,7 @@ impl App {
             DROP => (440.0, 128.0, 36.0),
             // Escondida: encolhe até um risquinho no topo antes de sumir (e cresce dele ao voltar).
             PILL if self.pill_hidden() => (90.0, 0.0, 0.0),
+            _ if ui.get_timer_on() => (210.0, 36.0, 18.0),
             _ if ui.get_show_music() => (360.0, 38.0, 19.0),
             _ => (230.0, 34.0, 17.0),
         }
@@ -297,6 +302,7 @@ impl App {
             self.ui.set_wa_unread(self.ui.get_wa_unread() + 1);
         }
         self.notify_source = source;
+        self.ui.set_notify_timer(false);
         self.ui.set_notify_mail(mail);
         if self.fullscreen_app || (mode != PILL && mode != NOTIFY) {
             return;
@@ -307,6 +313,64 @@ impl App {
         self.notify_serial += 1;
         let serial = self.notify_serial;
         slint::Timer::single_shot(Duration::from_secs(5), move || {
+            with_app(move |app| {
+                if app.ui.get_mode() == NOTIFY && app.notify_serial == serial {
+                    app.set_mode(PILL);
+                }
+            })
+        });
+    }
+
+    /// Começa (ou troca) o timer da pílula.
+    fn start_timer(&mut self, secs: u32) {
+        self.timer_total = secs;
+        self.timer_end = Some(std::time::Instant::now() + Duration::from_secs(secs as u64));
+        self.ui.set_timer_on(true);
+        self.tick_timer();
+        // Um tique por segundo, só enquanto há timer.
+        self.timer_tick.start(slint::TimerMode::Repeated, Duration::from_secs(1), || with_app(|app| app.tick_timer()));
+        if self.ui.get_mode() == PILL {
+            self.layout();
+        }
+    }
+
+    fn stop_timer(&mut self) {
+        self.timer_end = None;
+        self.timer_tick.stop();
+        self.ui.set_timer_on(false);
+        if self.ui.get_mode() == PILL {
+            self.layout();
+        }
+    }
+
+    fn tick_timer(&mut self) {
+        let Some(end) = self.timer_end else { return };
+        let left = end.saturating_duration_since(std::time::Instant::now());
+        let secs = (left.as_millis() as u32).div_ceil(1000);
+        self.ui.set_timer_text(nocto_core::timer::clock(secs).into());
+        self.ui.set_timer_left(secs as f32 / self.timer_total.max(1) as f32);
+        if secs == 0 {
+            let total = self.timer_total;
+            self.stop_timer();
+            self.timer_done(total);
+        }
+    }
+
+    /// Fim do timer: som do Windows e o banner na ilha (mesmo com a pílula escondida
+    /// atrás do navegador; em jogo de tela cheia, só o som).
+    fn timer_done(&mut self, total: u32) {
+        win::alert_sound();
+        let mode = self.ui.get_mode();
+        if self.fullscreen_app || (mode != PILL && mode != NOTIFY) {
+            return;
+        }
+        self.ui.set_notify_timer(true);
+        self.ui.set_notify_sender("Timer acabou".into());
+        self.ui.set_notify_text(format!("{} se passaram", nocto_core::timer::describe(total)).into());
+        self.set_mode(NOTIFY);
+        self.notify_serial += 1;
+        let serial = self.notify_serial;
+        slint::Timer::single_shot(Duration::from_secs(8), move || {
             with_app(move |app| {
                 if app.ui.get_mode() == NOTIFY && app.notify_serial == serial {
                     app.set_mode(PILL);
@@ -670,6 +734,18 @@ impl App {
                 });
             }
             Command::ShowCalendar => self.open_panel(1),
+            Command::Timer(nocto_core::timer::TimerCmd::Start(secs)) => {
+                self.start_timer(secs);
+                self.close(false);
+            }
+            Command::Timer(nocto_core::timer::TimerCmd::Cancel) => {
+                if self.timer_end.is_some() {
+                    self.stop_timer();
+                    self.close(false);
+                } else {
+                    self.set_status("Não tem timer rodando.", false);
+                }
+            }
             Command::Quit => {
                 let _ = slint::quit_event_loop();
             }
@@ -912,7 +988,15 @@ fn wire_callbacks(ui: &Island) {
             }
         })
     });
-    ui.on_open_notified(|| with_app(|app| app.open_messages_app(app.notify_source != Source::WhatsApp)));
+    ui.on_open_notified(|| {
+        with_app(|app| {
+            if app.ui.get_notify_timer() {
+                app.set_mode(PILL); // aviso do timer: o clique só fecha
+            } else {
+                app.open_messages_app(app.notify_source != Source::WhatsApp)
+            }
+        })
+    });
     ui.on_open_messages(|mail| with_app(move |app| app.open_messages_app(mail)));
     ui.on_msg_tab_changed(|| with_app(|app| app.mark_read()));
     ui.on_toggle_whatsapp(|| {
@@ -1174,6 +1258,9 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         pill_note: String::new(),
         volume: volume::Volume::new(),
         notify_serial: 0,
+        timer_end: None,
+        timer_total: 0,
+        timer_tick: slint::Timer::default(),
         wake: None,
         wake_paused: Default::default(),
         wa_msgs: Vec::new(),
@@ -1227,6 +1314,10 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         // Desenvolvimento: NOCTO_VOICE começa a ouvir logo ao abrir (com NOCTO_MODE=1).
         if std::env::var_os("NOCTO_VOICE").is_some() {
             app.ui.invoke_voice();
+        }
+        // Desenvolvimento: NOCTO_TIMER=segundos começa um timer ao abrir.
+        if let Some(secs) = std::env::var("NOCTO_TIMER").ok().and_then(|s| s.parse().ok()) {
+            app.start_timer(secs);
         }
         // Desenvolvimento: NOCTO_PLAYING simula música tocando na pílula.
         if std::env::var_os("NOCTO_PLAYING").is_some() {

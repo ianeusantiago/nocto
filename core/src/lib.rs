@@ -6,6 +6,7 @@ pub mod voicefix;
 pub mod voskdl;
 pub mod launcher;
 pub mod theme;
+pub mod timer;
 pub mod spotify;
 pub mod config;
 pub mod keys;

@@ -85,6 +85,7 @@ Não instala nada nem pede permissão de administrador. Para remover, apague o e
 | | |
 |---|---|
 | 🎵 **Música** | Capa do álbum, tempo e controles de qualquer player (Spotify, YouTube no navegador…). Knob de volume do Spotify. |
+| ⏱️ **Timer** | `timer 3 min`, `bota um timer de 25 minutos`, `timer 1h30` (ou por voz). A pílula conta o tempo com um anel; no fim, som e aviso. `cancela o timer` para. |
 | 🗓️ **Agenda** | Escolha o dia, digite `14:00 reunião` e Enter. Clique no item para concluir. |
 | 💬 **Mensagens** | WhatsApp e e-mail (Outlook, ou Gmail pelo navegador) pelas notificações do Windows. Clique para abrir. |
 | ⌨️ **Comandos** | `abre brave` · `abre github.com` · `abre C:\Projetos` · `toca <música>` · `toca playlist <nome>` · `pausa` · `próxima` · `agenda` |
