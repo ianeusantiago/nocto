@@ -144,7 +144,7 @@ impl App {
     /// A pílula some em jogo de tela cheia e quando uma janela cobre o topo
     /// (navegador maximizado). Encostar o mouse no topo mostra de novo.
     fn pill_hidden(&self) -> bool {
-        self.fullscreen_app || (self.covered && !self.peek)
+        self.fullscreen_app || (self.covered && !self.peek && self.ui.get_pill_flash().is_empty())
     }
 
     /// Confere a janela da frente e o mouse (a cada 0,5 s; custa quase nada).
