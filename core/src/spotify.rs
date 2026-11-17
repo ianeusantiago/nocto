@@ -78,6 +78,8 @@ pub fn play_error(status: u16, body: &str) -> String {
         (401, _) => "sessão expirada: faça login no Spotify de novo".into(),
         (_, "PREMIUM_REQUIRED") => "o Spotify exige conta Premium para isso".into(),
         (404, _) | (_, "NO_ACTIVE_DEVICE") => "nenhum player ativo: abra o Spotify e toque algo uma vez".into(),
+        // App do Spotify em modo de desenvolvimento: só contas cadastradas pelo dono podem usar.
+        (403, _) => "conta não liberada no app do Spotify: o dono do Client ID precisa adicionar seu e-mail em User Management (ou use Premium)".into(),
         _ => format!("o Spotify recusou o pedido ({status})"),
     }
 }
