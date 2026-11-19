@@ -1090,32 +1090,39 @@ export component Island inherits Window {
                             height: 34px;
                             border-radius: 17px;
                             background: mic-touch.has-hover ? root.ink.with-alpha(0.14) : transparent;
-                            // Microfone de palco: cabeça redonda com grade e cabo em cone.
+                            // Microfone de palco simples, tombado para a esquerda, com fio.
                             Path {
-                                x: 8px;
-                                y: 6px;
-                                width: 18px;
-                                height: 22px;
-                                viewbox-width: 18;
-                                viewbox-height: 22;
-                                fill: root.karaoke ? root.k-color : root.ink.with-alpha(0.75);
-                                MoveTo { x: 6.2; y: 10.2; }
-                                LineTo { x: 11.8; y: 10.2; }
-                                LineTo { x: 10.2; y: 21.4; }
-                                ArcTo { x: 7.8; y: 21.4; radius-x: 1.2; radius-y: 1.2; sweep: true; }
+                                x: 6px;
+                                y: 5px;
+                                width: 22px;
+                                height: 24px;
+                                viewbox-width: 22;
+                                viewbox-height: 24;
+                                fill: root.karaoke ? root.k-color : root.ink.with-alpha(0.8);
+                                // Cabeça (bolinha).
+                                MoveTo { x: 5.0; y: 5.5; }
+                                ArcTo { x: 11.0; y: 5.5; radius-x: 3.0; radius-y: 3.0; sweep: true; }
+                                ArcTo { x: 5.0; y: 5.5; radius-x: 3.0; radius-y: 3.0; sweep: true; }
+                                Close {}
+                                // Cabo em cone, levemente inclinado.
+                                MoveTo { x: 11.1; y: 7.6; }
+                                LineTo { x: 7.6; y: 9.2; }
+                                LineTo { x: 12.7; y: 18.6; }
+                                LineTo { x: 14.3; y: 17.8; }
                                 Close {}
                             }
-                            Rectangle {
-                                x: 10px;
-                                y: 3px;
-                                width: 14px;
-                                height: 14px;
-                                border-radius: 7px;
-                                background: root.karaoke ? root.k-color : root.ink.with-alpha(0.75);
-                                // Grade da cabeça.
-                                Rectangle { x: 3px; y: 4px; width: 8px; height: 1.4px; background: #00000055; }
-                                Rectangle { x: 2px; y: 7px; width: 10px; height: 1.4px; background: #00000055; }
-                                Rectangle { x: 3px; y: 10px; width: 8px; height: 1.4px; background: #00000055; }
+                            // Fiozinho saindo do cabo.
+                            Path {
+                                x: 6px;
+                                y: 5px;
+                                width: 22px;
+                                height: 24px;
+                                viewbox-width: 22;
+                                viewbox-height: 24;
+                                stroke: root.karaoke ? root.k-color : root.ink.with-alpha(0.8);
+                                stroke-width: 1.1px;
+                                MoveTo { x: 13.5; y: 18.2; }
+                                CubicTo { x: 18.5; y: 22.8; control-1-x: 14.4; control-1-y: 21.5; control-2-x: 18.5; control-2-y: 19.0; }
                             }
                             mic-touch := TouchArea {
                                 clicked => { root.toggle-karaoke(); }
