@@ -63,6 +63,16 @@ struct App {
     /// Página do painel: 0 música, 1 calendário.
     page: i32,
     progress_timer: slint::Timer,
+    karaoke: bool,
+    karaoke_timer: slint::Timer,
+    lyrics: Option<nocto_core::lyrics::Lyrics>,
+    lyrics_key: String,
+    sync_tick: u32,
+    /// Relógio suave do karaokê (ms) e quando foi avançado pela última vez.
+    k_pos: f64,
+    k_clock: Option<std::time::Instant>,
+    /// Última vez que a posição veio da API do Spotify.
+    synced_at: Option<std::time::Instant>,
     /// Aviso que substitui a data na pílula (ex.: atalho ocupado).
     pill_note: String,
     volume: volume::Volume,
@@ -93,7 +103,7 @@ struct App {
 
 /// Janela fixa (lógica) onde a ilha se transforma; cabe o maior modo (calendário).
 const WINDOW_W: f32 = 720.0;
-const WINDOW_H: f32 = 680.0;
+const WINDOW_H: f32 = 720.0;
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
@@ -115,6 +125,39 @@ fn with_app(f: impl FnOnce(&mut App) + 'static) {
 /// Agenda `f` na thread da interface a partir de qualquer thread.
 fn on_ui(f: impl FnOnce(&mut App) + Send + 'static) {
     let _ = slint::invoke_from_event_loop(move || with_app(f));
+}
+
+/// Cores da letra do karaokê ("auto" muda com o período do dia).
+const KARAOKE_COLORS: [(&str, &str, [u8; 4]); 6] = [
+    ("amarelo", "Amarelo", [0xff, 0xd1, 0x66, 0xff]),
+    ("rosa", "Rosa", [0xff, 0x6f, 0xae, 0xff]),
+    ("azul", "Azul", [0x4c, 0xc9, 0xff, 0xff]),
+    ("verde", "Verde", [0x7e, 0xe0, 0x81, 0xff]),
+    ("lilas", "Lilás", [0xb4, 0x9b, 0xff, 0xff]),
+    ("branco", "Branco", [0xff, 0xff, 0xff, 0xff]),
+];
+
+fn karaoke_rgb(name: &str, period: theme::Period) -> [u8; 4] {
+    if let Some(c) = KARAOKE_COLORS.iter().find(|c| c.0 == name) {
+        return c.2;
+    }
+    match period {
+        theme::Period::Day => [0xff, 0xd1, 0x66, 0xff],
+        theme::Period::Sunset => [0xff, 0x6f, 0xae, 0xff],
+        theme::Period::Night => [0xb4, 0x9b, 0xff, 0xff],
+    }
+}
+
+fn karaoke_label(name: &str) -> &'static str {
+    KARAOKE_COLORS.iter().find(|c| c.0 == name).map(|c| c.1).unwrap_or("Automática")
+}
+
+fn next_karaoke_color(name: &str) -> &'static str {
+    match KARAOKE_COLORS.iter().position(|c| c.0 == name) {
+        None => KARAOKE_COLORS[0].0,
+        Some(i) if i + 1 < KARAOKE_COLORS.len() => KARAOKE_COLORS[i + 1].0,
+        Some(_) => "auto",
+    }
 }
 
 fn color(c: [u8; 4]) -> Color {
@@ -193,8 +236,8 @@ impl App {
         match ui.get_mode() {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
-            CALENDAR if self.page == 0 => (680.0, 214.0, 40.0),
-            CALENDAR if self.page == 4 => (680.0, 660.0, 40.0),
+            CALENDAR if self.page == 0 => (680.0, if self.karaoke { 376.0 } else { 214.0 }, 40.0),
+            CALENDAR if self.page == 4 => (680.0, 698.0, 40.0),
             CALENDAR if self.page == 3 => (680.0, self.clip_height(), 40.0),
             NOTIFY => (440.0, 64.0, 32.0),
             CALENDAR => (680.0, 340.0, 40.0),
@@ -740,6 +783,145 @@ impl App {
         } else if !run {
             self.progress_timer.stop();
         }
+        let run_k = self.karaoke && self.ui.get_mode() == CALENDAR && self.page == 0;
+        if run_k && !self.karaoke_timer.running() {
+            self.karaoke_timer.start(slint::TimerMode::Repeated, Duration::from_millis(50), || {
+                with_app(|app| app.karaoke_tick())
+            });
+        } else if !run_k {
+            self.karaoke_timer.stop();
+        }
+    }
+
+    fn toggle_karaoke(&mut self) {
+        self.karaoke = !self.karaoke;
+        self.ui.set_karaoke(self.karaoke);
+        if self.karaoke {
+            self.load_lyrics();
+            self.karaoke_tick();
+        }
+        self.layout();
+        self.update_progress_timer();
+    }
+
+    /// Busca a letra da música atual (numa thread; o LRCLIB pode demorar).
+    fn load_lyrics(&mut self) {
+        let Some(t) = &self.track else {
+            self.lyrics_key.clear();
+            self.lyrics = None;
+            self.ui.set_k_msg("Nada tocando".into());
+            return;
+        };
+        let key = format!("{}\u{1}{}", t.artist, t.title);
+        if key == self.lyrics_key {
+            return;
+        }
+        self.lyrics_key = key.clone();
+        self.lyrics = None;
+        self.ui.set_k_msg("Procurando a letra…".into());
+        let (dir, artist, title, dur) = (self.dir.clone(), t.artist.clone(), t.title.clone(), t.duration_ms / 1000);
+        std::thread::spawn(move || {
+            let res = nocto_core::lyrics::fetch(&dir, &artist, &title, dur);
+            on_ui(move |app| {
+                if app.lyrics_key != key {
+                    return;
+                }
+                let msg = match res {
+                    Ok(Some(l)) => {
+                        app.lyrics = Some(l);
+                        ""
+                    }
+                    Ok(None) => "Sem letra para esta música",
+                    Err(_) => "Sem conexão para buscar a letra",
+                };
+                app.ui.set_k_msg(msg.into());
+                app.karaoke_tick();
+            });
+        });
+    }
+
+    /// Spotify conectado: acerta a posição pela API a cada ~2 s (a do Windows atrasa).
+    fn karaoke_sync(&mut self) {
+        let Some(t) = &self.track else { return };
+        if !t.spotify {
+            return;
+        }
+        let title = t.title.clone();
+        let cfg = self.spotify_config();
+        std::thread::spawn(move || {
+            let sent = std::time::Instant::now();
+            let Some((name, pos, playing)) = spotify::now_playing(&cfg) else { return };
+            let half = sent.elapsed() / 2;
+            on_ui(move |app| {
+                if let Some(t) = app.track.as_mut() {
+                    if t.title == name || name.starts_with(&t.title) || t.title.starts_with(&name) {
+                        t.position_ms = pos + half.as_millis() as u64;
+                        t.read_at = sent + half;
+                        app.synced_at = Some(std::time::Instant::now());
+                        t.playing = playing;
+                    }
+                }
+                let _ = title;
+            });
+        });
+    }
+
+    fn karaoke_tick(&mut self) {
+        self.sync_tick = self.sync_tick.wrapping_add(1);
+        if self.sync_tick % 40 == 1 {
+            self.karaoke_sync();
+        }
+        let (Some(t), Some(l)) = (&self.track, &self.lyrics) else {
+            for f in [Island::set_k_prev, Island::set_k_cur, Island::set_k_next, Island::set_k_next2] {
+                f(&self.ui, "".into());
+            }
+            self.ui.set_k_gap(false);
+            return;
+        };
+        let target = format::position_now(t.position_ms, t.read_at.elapsed().as_millis() as u64, t.playing, t.duration_ms) as f64;
+        // Relógio suave: anda com o tempo real e corrige devagar em direção à posição
+        // informada, sem voltar para trás (só pula se a diferença for grande, como num seek).
+        let now = std::time::Instant::now();
+        let dt = self.k_clock.map_or(0.0, |c| now.duration_since(c).as_secs_f64() * 1000.0);
+        self.k_clock = Some(now);
+        if t.playing {
+            self.k_pos += dt;
+        }
+        let err = target - self.k_pos;
+        if err.abs() > 1500.0 || !t.playing {
+            self.k_pos = target;
+        } else {
+            self.k_pos += (err * 0.08).max(-dt * 0.5);
+        }
+        let pos = self.k_pos.max(0.0) as u64;
+        let lines = &l.lines;
+        let text = |i: Option<usize>| -> slint::SharedString {
+            i.and_then(|i| lines.get(i)).map(|x| x.1.as_str()).unwrap_or("").into()
+        };
+        let (idx, fill, gap) = if l.synced {
+            let idx = nocto_core::lyrics::current(lines, pos);
+            let start = idx.map(|i| lines[i].0).unwrap_or(0);
+            let end = idx.map_or(lines.first().map(|x| x.0), |i| lines.get(i + 1).map(|x| x.0)).unwrap_or(t.duration_ms.max(start + 4000));
+            let fill = idx.map_or(0.0, |i| l.fill(i, pos));
+            // Linha vazia, ou a linha já acabou e a próxima demora: bolinhas.
+            let empty = idx.map_or(true, |i| lines[i].1.is_empty() || l.ends[i].is_some_and(|e| pos > e + 2500));
+            let gap = empty && end.saturating_sub(pos) > 1500;
+            (idx, fill, gap)
+        } else {
+            // Sem sincronia: rola a letra conforme o andamento da música.
+            let n = lines.len().max(1);
+            let i = if t.duration_ms > 0 { (pos as usize * n / t.duration_ms as usize).min(n - 1) } else { 0 };
+            (Some(i), 0.0, false)
+        };
+        let i = idx.map(|i| i as isize).unwrap_or(-1);
+        let at = |k: isize| if i + k >= 0 { Some((i + k) as usize) } else { None };
+        self.ui.set_k_prev(text(at(-1)));
+        self.ui.set_k_cur(text(at(0)));
+        self.ui.set_k_next(text(at(1)));
+        self.ui.set_k_next2(text(at(2)));
+        self.ui.set_k_fill(fill);
+        self.ui.set_k_gap(gap);
+        self.ui.set_progress(format::progress(pos, t.duration_ms));
     }
 
     fn refresh_progress(&self) {
@@ -805,6 +987,8 @@ impl App {
         }
         self.ui.set_accent(color(p.accent));
         self.ui.set_ink(color(p.text));
+        self.ui.set_k_color(color(karaoke_rgb(&self.config.karaoke_color, self.config.theme.resolve(h, m))));
+        self.ui.set_k_color_label(karaoke_label(&self.config.karaoke_color).into());
         self.ui.set_theme_label(self.config.theme.label().into());
     }
 
@@ -1394,6 +1578,13 @@ fn wire_callbacks(ui: &Island) {
         }
         with_app(move |app| app.volume.set(v))
     });
+    ui.on_cycle_karaoke_color(|| {
+        with_app(|app| {
+            app.config.karaoke_color = next_karaoke_color(&app.config.karaoke_color).into();
+            let _ = app.config.save(&app.dir.join("config.json"));
+            app.apply_theme();
+        })
+    });
     ui.on_cycle_open_page(|| {
         with_app(|app| {
             app.config.open_page = app.config.open_page.next();
@@ -1417,6 +1608,7 @@ fn wire_callbacks(ui: &Island) {
         })
     });
     ui.on_play_pause(media::play_pause);
+    ui.on_toggle_karaoke(|| with_app(|app| app.toggle_karaoke()));
     ui.on_next_track(media::next);
     ui.on_prev_month(|| with_app(|app| app.shift_month(-1)));
     ui.on_next_month(|| with_app(|app| app.shift_month(1)));
@@ -1598,6 +1790,14 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         track: None,
         page: 0,
         progress_timer: slint::Timer::default(),
+        karaoke: false,
+        karaoke_timer: slint::Timer::default(),
+        lyrics: None,
+        lyrics_key: String::new(),
+        sync_tick: 0,
+        k_pos: 0.0,
+        k_clock: None,
+        synced_at: None,
         pill_note: String::new(),
         volume: volume::Volume::new(),
         notify_serial: 0,
@@ -1679,6 +1879,29 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         // Desenvolvimento: NOCTO_CLIP_OPEN=i abre o preview do item i depois de 4 s.
         if let Some(i) = std::env::var("NOCTO_CLIP_OPEN").ok().and_then(|s| s.parse::<usize>().ok()) {
             slint::Timer::single_shot(Duration::from_secs(8), move || with_app(move |app| app.open_clip(i)));
+        }
+        // Desenvolvimento: NOCTO_KARAOKE liga o karaokê 3 s depois de abrir.
+        if std::env::var_os("NOCTO_KARAOKE").is_some() {
+            slint::Timer::single_shot(Duration::from_secs(3), || {
+                with_app(|app| {
+                    if app.track.is_none() {
+                        app.track = Some(media::Track {
+                            title: "Ghost Town".into(),
+                            artist: "Kanye West".into(),
+                            playing: true,
+                            spotify: true,
+                            position_ms: 18_000,
+                            duration_ms: 271_000,
+                            read_at: std::time::Instant::now(),
+                            cover: None,
+                        });
+                        app.ui.set_song_title("Ghost Town".into());
+                        app.ui.set_artist("Kanye West".into());
+                        app.ui.set_has_track(true);
+                    }
+                    app.toggle_karaoke()
+                })
+            });
         }
         // Desenvolvimento: NOCTO_TIMER=segundos começa um timer ao abrir.
         if let Some(secs) = std::env::var("NOCTO_TIMER").ok().and_then(|s| s.parse().ok()) {
@@ -1762,12 +1985,25 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
                 }
             }
             app.ui.set_has_track(track.is_some());
+            // A posição do Windows atrasa: se a da API do Spotify é recente e a música é a
+            // mesma, mantém a da API (senão a letra pulava para trás).
+            let fresh = app.synced_at.is_some_and(|s| s.elapsed() < Duration::from_secs(5));
+            let prev = app.track.as_ref().map(|t| (t.title.clone(), t.playing, t.position_ms, t.read_at));
             app.track = track.map(|mut t| {
                 t.cover = None;
+                if let Some((title, playing, pos, at)) = &prev {
+                    if fresh && *title == t.title && *playing == t.playing {
+                        t.position_ms = *pos;
+                        t.read_at = *at;
+                    }
+                }
                 t
             });
             app.update_compact();
             app.update_progress_timer();
+            if app.karaoke {
+                app.load_lyrics();
+            }
             // Música mudou com a página aberta e o knob sem volume: tenta achar de novo
             // (o Spotify só cria a sessão de áudio quando começa a tocar).
             if app.ui.get_mode() == CALENDAR && !app.ui.get_has_volume() {

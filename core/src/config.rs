@@ -191,6 +191,8 @@ pub struct Config {
     pub autostart: bool,
     /// Mostrar "Copiado" na pílula ao copiar algo.
     pub clip_flash: bool,
+    /// Cor da letra no karaokê: "auto" (muda com dia, pôr do sol e noite) ou um nome.
+    pub karaoke_color: String,
 }
 
 impl Default for Config {
@@ -208,6 +210,7 @@ impl Default for Config {
             glass: GlassMode::Liquid,
             autostart: true,
             clip_flash: true,
+            karaoke_color: "auto".into(),
         }
     }
 }

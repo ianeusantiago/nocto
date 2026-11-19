@@ -287,6 +287,17 @@ pub fn play_payload(track: &Track) -> Value {
     }
 }
 
+/// Música e posição atuais no Spotify (para o karaokê). `None` se nada toca ou sem login.
+pub fn now_playing(cfg: &Config) -> Option<(String, u64, bool)> {
+    if cfg.client_id.is_empty() || !cfg.token_path.exists() {
+        return None;
+    }
+    let token = access_token(cfg).ok()?;
+    let body = get(&format!("Bearer {token}"), "https://api.spotify.com/v1/me/player/currently-playing").ok()?;
+    let v: Value = serde_json::from_str(&body).ok()?;
+    Some((v["item"]["name"].as_str()?.to_string(), v["progress_ms"].as_u64()?, v["is_playing"].as_bool().unwrap_or(false)))
+}
+
 fn get(auth: &str, url: &str) -> Result<String, String> {
     let mut resp = agent().get(url).header("Authorization", auth).call().map_err(|e| format!("sem conexão: {e}"))?;
     let status = resp.status().as_u16();
