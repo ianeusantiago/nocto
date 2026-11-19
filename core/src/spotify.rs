@@ -262,6 +262,41 @@ pub fn play_query(cfg: &Config, query: &str) -> Result<String, String> {
     Ok(format!("Tocando: {}", track.label))
 }
 
+/// Põe uma música na fila do Spotify (toca depois da atual). Retorna "Na fila: …".
+pub fn queue_query(cfg: &Config, query: &str) -> Result<String, String> {
+    if cfg.client_id.is_empty() {
+        return Err(missing_id());
+    }
+    let auth = format!("Bearer {}", access_token(cfg)?);
+    let (title, artist) = split_query(query);
+    let mut track = None;
+    if let Some(artist) = &artist {
+        track = best_track(&search(&auth, &format!("track:\"{title}\" artist:\"{artist}\""))?, query);
+    }
+    if track.is_none() {
+        track = best_track(&search(&auth, query)?, query);
+    }
+    let track = track.ok_or_else(|| format!("não achei \"{query}\" no Spotify"))?;
+    let device = active_device(&get(&auth, "https://api.spotify.com/v1/me/player")?);
+    let mut url = format!("https://api.spotify.com/v1/me/player/queue?uri={}", enc(&track.uri));
+    if let Some(id) = &device {
+        url.push_str(&format!("&device_id={}", enc(id)));
+    }
+    let mut resp = agent()
+        .post(&url)
+        .header("Authorization", &auth)
+        .send_empty()
+        .map_err(|e| format!("sem conexão: {e}"))?;
+    let status = resp.status().as_u16();
+    if status == 404 {
+        return Err("Abra o Spotify e toque algo antes de usar a fila".into());
+    }
+    if !(200..300).contains(&status) {
+        return Err(play_error(status, &resp.body_mut().read_to_string().unwrap_or_default()));
+    }
+    Ok(format!("Na fila: {}", track.label))
+}
+
 fn start_playback(auth: &str, track: &Track, device: Option<&str>) -> Result<(u16, String), String> {
     let url = match device {
         Some(id) => format!("https://api.spotify.com/v1/me/player/play?device_id={}", enc(id)),

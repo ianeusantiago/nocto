@@ -1120,6 +1120,26 @@ impl App {
                     });
                 });
             }
+            Command::SpotifyQueue(name) => {
+                self.set_status(&format!("Procurando \"{name}\"…"), false);
+                let cfg = self.spotify_config();
+                std::thread::spawn(move || {
+                    let result = spotify::queue_query(&cfg, &name);
+                    on_ui(move |app| match result {
+                        Ok(msg) => {
+                            app.set_status(&msg, false);
+                            slint::Timer::single_shot(Duration::from_millis(1500), || {
+                                with_app(|app| {
+                                    if app.ui.get_mode() == BAR {
+                                        app.close(true);
+                                    }
+                                })
+                            });
+                        }
+                        Err(e) => app.set_status(&e, true),
+                    });
+                });
+            }
             Command::SpotifyAlbum(name) => {
                 self.set_status(&format!("Procurando o álbum \"{name}\"…"), false);
                 let cfg = self.spotify_config();

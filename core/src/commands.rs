@@ -7,6 +7,8 @@ pub enum Command {
     OpenFolder(String),
     SpotifyPlay(String),
     SpotifyPlaylist(String),
+    /// "coloca na fila ghost town": entra na fila do Spotify (toca depois da atual).
+    SpotifyQueue(String),
     /// "toca álbum late registration by kanye west".
     SpotifyAlbum(String),
     SpotifyPause,
@@ -84,6 +86,9 @@ pub fn parse(input: &str) -> Command {
     if let Some(id) = spotify_client_id(input) {
         return Command::SpotifyClientId(id);
     }
+    if let Some(q) = queue_query(input) {
+        return Command::SpotifyQueue(q);
+    }
     // Antes do "toca/bota": "bota um timer de 3 minutos" é timer, não música.
     if let Some(t) = crate::timer::parse(&whole) {
         return Command::Timer(t);
@@ -145,6 +150,37 @@ fn open_target(rest: &str) -> Command {
         return Command::OpenUrl(format!("https://{target}"));
     }
     Command::OpenApp(lower)
+}
+
+/// "coloca na fila X", "bota X na fila", "fila X" → X (em minúsculas).
+fn queue_query(input: &str) -> Option<String> {
+    let lower = input.trim().to_lowercase();
+    let lower = lower.split_whitespace().collect::<Vec<_>>().join(" ");
+    const VERBS: [&str; 7] = ["coloca", "coloque", "bota", "adiciona", "põe", "poe", "joga"];
+    let mut rest = lower.as_str();
+    let mut verb = false;
+    for v in VERBS {
+        if let Some(r) = rest.strip_prefix(v).and_then(|r| r.strip_prefix(' ')) {
+            rest = r;
+            verb = true;
+            break;
+        }
+    }
+    for p in ["na fila ", "a fila ", "fila "] {
+        if let Some(r) = rest.strip_prefix(p) {
+            let r = r.trim_start_matches("a ").trim_start_matches("o ").trim();
+            return (!r.is_empty()).then(|| r.to_string());
+        }
+    }
+    if verb {
+        for s in [" na fila", " pra fila", " para a fila"] {
+            if let Some(r) = rest.strip_suffix(s) {
+                let r = r.trim();
+                return (!r.is_empty()).then(|| r.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -214,6 +250,10 @@ mod playlist_tests {
         assert_eq!(parse("toca playlist only day"), Command::SpotifyPlaylist("only day".into()));
         assert_eq!(parse("toca álbum Late Registration by Kanye West"), Command::SpotifyAlbum("late registration by kanye west".into()));
         assert_eq!(parse("toca o album ye"), Command::SpotifyAlbum("ye".into()));
+        assert_eq!(parse("coloca na fila Ghost Town"), Command::SpotifyQueue("ghost town".into()));
+        assert_eq!(parse("bota passionfruit do drake na fila"), Command::SpotifyQueue("passionfruit do drake".into()));
+        assert_eq!(parse("fila runaway"), Command::SpotifyQueue("runaway".into()));
+        assert_eq!(parse("bota um timer de 3 minutos"), parse("timer 3 min"));
         assert_eq!(parse("toca álbum"), Command::SpotifyPlay("álbum".into()));
         assert_eq!(parse("Toca a playlist Only Day"), Command::SpotifyPlaylist("only day".into()));
         assert_eq!(parse("tocar minha playlist only day"), Command::SpotifyPlaylist("only day".into()));

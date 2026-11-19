@@ -124,7 +124,7 @@ pub fn grammar(apps: &[String]) -> String {
 /// Junta as duas leituras da mesma fala: a da lista fechada (`picked`) e a livre (`free`).
 pub fn command(picked: &str, free: &str, apps: &[String]) -> String {
     // Timer é frase livre com números ("bota um timer de três minutos"): usa a leitura livre.
-    if ["timer", "temporizador", "cronômetro"].iter().any(|w| free.contains(w)) {
+    if ["timer", "temporizador", "cronômetro", "fila"].iter().any(|w| free.contains(w)) {
         return free.trim().to_string();
     }
     let picked = picked.replace("[unk]", "").trim().to_string();

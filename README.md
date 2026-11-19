@@ -90,7 +90,7 @@ Não instala nada nem pede permissão de administrador. Para remover, apague o e
 | 🎤 **Karaokê** | Na página de música, toque no microfone: a letra aparece sincronizada (LRCLIB), linha por linha, na cor do momento do dia (ou a que você escolher em Configurações). |
 | 🗓️ **Agenda** | Escolha o dia, digite `14:00 reunião` e Enter. Clique no item para concluir. |
 | 💬 **Mensagens** | WhatsApp e e-mail (Outlook, ou Gmail pelo navegador) pelas notificações do Windows. Clique para abrir. |
-| ⌨️ **Comandos** | `abre brave` · `abre github.com` · `abre C:\Projetos` · `toca <música>` · `toca playlist <nome>` · `toca álbum <nome> by <artista>` · `pausa` · `próxima` · `agenda` |
+| ⌨️ **Comandos** | `abre brave` · `abre github.com` · `abre C:\Projetos` · `toca <música>` · `toca playlist <nome>` · `toca álbum <nome> by <artista>` · `coloca na fila <música>` · `pausa` · `próxima` · `agenda` |
 | 🎙️ **Voz** | Clique no microfone e fale o comando. Opcional: diga **"Nocto"** para chamar sem tocar em nada. 100% offline. |
 | 🖼️ **Imagens** | Arraste uma imagem até a ilha: PNG, JPEG, WebP ou **remover fundo** (IA local). A miniatura abre o arquivo no Explorador. |
 | 🎮 **Modo jogo** | Em tela cheia, a ilha some e para de animar. Com o navegador maximizado ela se esconde; encoste o mouse no topo para espiar. |
