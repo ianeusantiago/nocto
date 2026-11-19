@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod clipboard;
+mod devices;
 mod glass;
 mod media;
 mod notify;
@@ -70,6 +71,8 @@ struct App {
     sync_tick: u32,
     /// Relógio suave do karaokê (ms) e quando foi avançado pela última vez.
     k_pos: f64,
+    /// Linha atual do karaokê (para animar a troca).
+    k_idx: Option<usize>,
     k_clock: Option<std::time::Instant>,
     /// Última vez que a posição veio da API do Spotify.
     synced_at: Option<std::time::Instant>,
@@ -91,6 +94,11 @@ struct App {
     wake_paused: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Últimas mensagens do WhatsApp, para a página delas.
     wa_msgs: Vec<WaMsg>,
+    /// Última mensagem (origem com hora, quem mandou, texto) para o Início.
+    last_msg: Option<(String, String, String)>,
+    /// Bateria, câmera/microfone e fones (lidos em segundo plano).
+    dev: DevState,
+    flash_serial: u64,
     /// Arquivo cuja miniatura está na tela de soltar (clique abre no Explorador).
     preview_path: std::cell::RefCell<Option<PathBuf>>,
     mail_msgs: Vec<WaMsg>,
@@ -162,6 +170,37 @@ fn next_karaoke_color(name: &str) -> &'static str {
 
 fn color(c: [u8; 4]) -> Color {
     Color::from_argb_u8(c[3], c[0], c[1], c[2])
+}
+
+/// O que o leitor de aparelhos encontrou na última volta.
+#[derive(Default, Clone)]
+struct DevState {
+    read: bool,
+    bat: Option<devices::Battery>,
+    cam: Vec<String>,
+    mic: Vec<String>,
+    headsets: Vec<devices::Headset>,
+}
+
+/// Lê bateria e câmera/microfone a cada 2 s e os fones a cada 10 s (leitura barata).
+fn watch_devices() {
+    std::thread::spawn(|| {
+        let mut headsets = Vec::new();
+        for round in 0u64.. {
+            if round % 5 == 0 {
+                headsets = devices::bluetooth_batteries();
+            }
+            let state = DevState {
+                read: true,
+                bat: devices::battery(),
+                cam: devices::in_use("webcam"),
+                mic: devices::in_use("microphone"),
+                headsets: headsets.clone(),
+            };
+            on_ui(move |app| app.apply_devices(state));
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
 }
 
 fn iso_today() -> String {
@@ -237,6 +276,7 @@ impl App {
             BAR if ui.get_status().is_empty() => (600.0, 58.0, 29.0),
             BAR => (600.0, 86.0, 32.0),
             CALENDAR if self.page == 0 => (680.0, if self.karaoke { 376.0 } else { 214.0 }, 40.0),
+            CALENDAR if self.page == 5 => (680.0, 262.0, 40.0),
             CALENDAR if self.page == 4 => (680.0, 698.0, 40.0),
             CALENDAR if self.page == 3 => (680.0, self.clip_height(), 40.0),
             NOTIFY => (440.0, 64.0, 32.0),
@@ -247,8 +287,8 @@ impl App {
             PILL if self.pill_hidden() => (90.0, 0.0, 0.0),
             _ if !ui.get_pill_flash().is_empty() => (320.0, 36.0, 18.0),
             _ if ui.get_timer_on() => (210.0, 36.0, 18.0),
-            _ if ui.get_show_music() => (360.0, 38.0, 19.0),
-            _ => (230.0, 34.0, 17.0),
+            _ if ui.get_show_music() => (360.0 + self.privacy_dots(), 38.0, 19.0),
+            _ => (230.0 + self.privacy_dots(), 34.0, 17.0),
         }
     }
 
@@ -319,6 +359,9 @@ impl App {
         if page == 4 {
             self.refresh_settings();
         }
+        if page == 5 {
+            self.refresh_home();
+        }
         self.layout();
         self.update_progress_timer();
     }
@@ -334,7 +377,8 @@ impl App {
         // Guarda na página de mensagens (as 5 mais novas no topo de cada aba).
         let now = win::local_time();
         let time = format!("{:02}:{:02}", now.3, now.4);
-        let item = WaMsg { sender: msg.sender.clone().into(), text: msg.text.clone().into(), time: time.into() };
+        let item = WaMsg { sender: msg.sender.clone().into(), text: msg.text.clone().into(), time: time.clone().into() };
+        self.last_msg = Some((format!("{} · {time}", if mail { "E-mail" } else { "WhatsApp" }), msg.sender.clone(), msg.text.clone()));
         let list = if mail { &mut self.mail_msgs } else { &mut self.wa_msgs };
         list.insert(0, item);
         list.truncate(5);
@@ -498,21 +542,132 @@ impl App {
             self.refresh_clips();
             self.layout();
         }
-        if self.config.clip_flash && self.ui.get_mode() == PILL && !self.fullscreen_app {
-            self.ui.set_pill_flash(if flash.is_empty() { " ".into() } else { flash.into() });
-            self.layout();
-            self.clip_serial += 1;
-            let serial = self.clip_serial;
-            slint::Timer::single_shot(Duration::from_millis(1400), move || {
-                with_app(move |app| {
-                    if app.clip_serial == serial {
-                        app.ui.set_pill_flash("".into());
-                        if app.ui.get_mode() == PILL {
-                            app.layout();
+        if self.config.clip_flash {
+            self.flash_pill("\u{E73E}", "Copiado", None, &flash, 1400);
+        }
+    }
+
+    /// Aviso rápido na pílula (copiado, carregando, fone conectado, bateria baixa).
+    fn flash_pill(&mut self, icon: &str, title: &str, tint: Option<[u8; 4]>, text: &str, ms: u64) {
+        if self.ui.get_mode() != PILL || self.fullscreen_app {
+            return;
+        }
+        self.ui.set_flash_icon(icon.into());
+        self.ui.set_flash_title(title.into());
+        self.ui.set_flash_color(tint.map(color).unwrap_or(Color::from_argb_u8(0, 0, 0, 0)));
+        self.ui.set_pill_flash(if text.is_empty() { " ".into() } else { text.into() });
+        self.layout();
+        self.flash_serial += 1;
+        let serial = self.flash_serial;
+        slint::Timer::single_shot(Duration::from_millis(ms), move || {
+            with_app(move |app| {
+                if app.flash_serial == serial {
+                    app.ui.set_pill_flash("".into());
+                    if app.ui.get_mode() == PILL {
+                        app.layout();
+                    }
+                }
+            })
+        });
+    }
+
+    /// Largura extra da pílula para as bolinhas de câmera/microfone.
+    fn privacy_dots(&self) -> f32 {
+        let n = (!self.dev.cam.is_empty()) as i32 + (!self.dev.mic.is_empty()) as i32;
+        n as f32 * 17.0
+    }
+
+    /// Novo estado do aparelho: atualiza o Início e avisa na pílula o que mudou.
+    fn apply_devices(&mut self, new: DevState) {
+        let old = std::mem::replace(&mut self.dev, new);
+        let d = &self.dev;
+        self.ui.set_cam_app(d.cam.join(", ").into());
+        self.ui.set_mic_app(d.mic.join(", ").into());
+        if let Some(b) = d.bat {
+            self.ui.set_has_bat(true);
+            self.ui.set_bat_pct(b.percent as i32);
+            self.ui.set_bat_charging(b.charging);
+        } else {
+            self.ui.set_has_bat(false);
+            self.ui.set_bat_charging(false);
+        }
+        match d.headsets.first() {
+            Some(h) => {
+                self.ui.set_hs_name(h.name.clone().into());
+                self.ui.set_hs_pct(h.percent as i32);
+            }
+            None => {
+                self.ui.set_hs_name("".into());
+                self.ui.set_hs_pct(-1);
+            }
+        }
+        let dots_changed = (old.cam.is_empty(), old.mic.is_empty()) != (self.dev.cam.is_empty(), self.dev.mic.is_empty());
+        // Avisos (só depois da primeira leitura, para não avisar tudo ao abrir).
+        if old.read {
+            let (new_bat, new_hs) = (self.dev.bat, self.dev.headsets.clone());
+            if let (Some(n), Some(o)) = (new_bat, old.bat) {
+                if n.charging && !o.charging {
+                    self.flash_pill("\u{E945}", "Carregando", Some([0x34, 0xc7, 0x59, 0xff]), &format!("{}%", n.percent), 2500);
+                } else if !n.charging {
+                    for limit in [20u8, 10] {
+                        if n.percent <= limit && o.percent > limit {
+                            self.flash_pill("\u{E850}", &format!("Bateria em {}%", n.percent), Some([0xff, 0x45, 0x3a, 0xff]), "ligue o carregador", 4000);
                         }
                     }
-                })
-            });
+                }
+            }
+            for h in &new_hs {
+                if !old.headsets.iter().any(|o| o.name == h.name) {
+                    self.flash_pill("\u{E7F6}", &h.name, None, &format!("conectado · {}%", h.percent), 3000);
+                }
+            }
+        }
+        if dots_changed && self.ui.get_mode() == PILL {
+            self.layout();
+        }
+        if self.ui.get_mode() == CALENDAR && self.page == 5 {
+            self.refresh_home();
+        }
+    }
+
+    /// Dados do Início: agenda de hoje e última mensagem.
+    fn refresh_home(&self) {
+        let (y, m, d, h, min, _) = win::local_time();
+        self.ui.set_h_date(format::date_label(y, m, d).into());
+        let today = iso_today();
+        let now = format!("{h:02}:{min:02}");
+        let events = self.cal.on(&today);
+        let pending: Vec<_> = events.iter().filter(|e| !e.done && e.time.as_deref().is_none_or(|t| t >= now.as_str())).collect();
+        match pending.first() {
+            Some(e) => {
+                let label = match &e.time {
+                    Some(t) => format!("{t} · {}", e.title),
+                    None => e.title.clone(),
+                };
+                self.ui.set_h_event(label.into());
+                let more = pending.len() - 1;
+                self.ui.set_h_event_more(match more {
+                    0 => "Mais nada hoje".into(),
+                    1 => "+1 evento hoje".into(),
+                    n => format!("+{n} eventos hoje").into(),
+                });
+            }
+            None => {
+                self.ui.set_h_event("Nada marcado hoje".into());
+                self.ui.set_h_event_more("Toque para ver a agenda".into());
+            }
+        }
+        match &self.last_msg {
+            Some((src, who, text)) => {
+                self.ui.set_h_msg_src(src.clone().into());
+                self.ui.set_h_msg_sender(who.clone().into());
+                self.ui.set_h_msg_text(text.clone().into());
+            }
+            None => {
+                self.ui.set_h_msg_src("Mensagens".into());
+                self.ui.set_h_msg_sender("Nenhuma mensagem nova".into());
+                self.ui.set_h_msg_text("WhatsApp e e-mail aparecem aqui".into());
+            }
         }
     }
 
@@ -749,6 +904,9 @@ impl App {
         if page == 3 {
             self.refresh_clips();
         }
+        if page == 5 {
+            self.refresh_home();
+        }
         self.ui.set_settings_note("".into());
         self.apply_theme();
         self.set_mode(CALENDAR);
@@ -775,7 +933,7 @@ impl App {
     /// A barra de tempo só anda com a página de música aberta e a música tocando.
     fn update_progress_timer(&self) {
         self.refresh_progress();
-        let run = self.ui.get_mode() == CALENDAR && self.page == 0 && self.ui.get_playing();
+        let run = self.ui.get_mode() == CALENDAR && (self.page == 0 || self.page == 5) && self.ui.get_playing();
         if run && !self.progress_timer.running() {
             self.progress_timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), || {
                 with_app(|app| app.refresh_progress())
@@ -915,6 +1073,20 @@ impl App {
         };
         let i = idx.map(|i| i as isize).unwrap_or(-1);
         let at = |k: isize| if i + k >= 0 { Some((i + k) as usize) } else { None };
+        if idx != self.k_idx {
+            // Linha nova: o bloco aparece uma linha abaixo e sobe até o lugar.
+            if self.k_idx.is_some() && idx.is_some() && idx > self.k_idx {
+                self.ui.set_k_jump(true);
+                self.ui.set_k_shift(30.0);
+                slint::Timer::single_shot(Duration::from_millis(16), || {
+                    with_app(|app| {
+                        app.ui.set_k_jump(false);
+                        app.ui.set_k_shift(0.0);
+                    })
+                });
+            }
+            self.k_idx = idx;
+        }
         self.ui.set_k_prev(text(at(-1)));
         self.ui.set_k_cur(text(at(0)));
         self.ui.set_k_next(text(at(1)));
@@ -1836,6 +2008,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         lyrics_key: String::new(),
         sync_tick: 0,
         k_pos: 0.0,
+        k_idx: None,
         k_clock: None,
         synced_at: None,
         pill_note: String::new(),
@@ -1850,6 +2023,9 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         wake: None,
         wake_paused: Default::default(),
         wa_msgs: Vec::new(),
+        last_msg: None,
+        dev: DevState::default(),
+        flash_serial: 0,
         preview_path: Default::default(),
         mail_msgs: Vec::new(),
         mail_source: Source::Email { web: true },
@@ -2055,6 +2231,7 @@ fn start(ui: Island, hwnd: isize, config: Config, dir: PathBuf) {
         })
     });
 
+    watch_devices();
     // Mensagens do WhatsApp, pelas notificações do Windows.
     notify::watch(|source, texts| on_ui(move |app| app.show_message(source, texts)));
     with_app(|app| {

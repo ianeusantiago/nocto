@@ -329,6 +329,9 @@ export component Island inherits Window {
     callback clip-clear();
     // "Copiado" rapidinho na pílula.
     in property <string> pill-flash;
+    in property <string> flash-icon: "\u{E73E}";
+    in property <string> flash-title: "Copiado";
+    in property <color> flash-color: transparent;
     in property <bool> clip-flash-on;
     callback toggle-clip-flash();
     // Miniatura da imagem solta (e do resultado, depois de converter / tirar o fundo).
@@ -434,10 +437,30 @@ export component Island inherits Window {
     callback toggle-karaoke();
     in property <color> k-color: #ffd166;
     in property <string> k-color-label;
+    // Troca de linha: as linhas começam um pouco abaixo e sobem suavemente (como no Spotify).
+    in property <length> k-shift;
+    in property <bool> k-jump;
     callback cycle-karaoke-color();
     callback next-track();
     callback prev-track();
     callback go-page(int);
+    // Ordem na tela: Início (5) primeiro, depois música (0) … configurações (4).
+    pure function vis(p: int) -> int { return p == 5 ? 0 : p + 1; }
+    pure function unvis(v: int) -> int { return v == 0 ? 5 : v - 1; }
+    // Página Início.
+    in property <string> h-date;
+    in property <string> h-event;
+    in property <string> h-event-more;
+    in property <bool> has-bat;
+    in property <int> bat-pct;
+    in property <bool> bat-charging;
+    in property <string> hs-name;
+    in property <int> hs-pct: -1;
+    in property <string> h-msg-src;
+    in property <string> h-msg-sender;
+    in property <string> h-msg-text;
+    in property <string> cam-app;
+    in property <string> mic-app;
     callback cycle-compact();
     callback cycle-open-page();
     callback cycle-glass();
@@ -521,8 +544,8 @@ export component Island inherits Window {
                 padding-left: 14px;
                 padding-right: 16px;
                 spacing: 9px;
-                Glyph { text: "\u{E73E}"; color: root.accent; font-size: 14px; }
-                Text { text: "Copiado"; color: root.ink; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+                Glyph { text: root.flash-icon; color: root.flash-color.alpha > 0 ? root.flash-color : root.accent; font-size: 14px; }
+                Text { text: root.flash-title; color: root.ink; font-size: 13px; font-weight: 700; vertical-alignment: center; }
                 Text { text: root.pill-flash; color: root.ink.with-alpha(0.6); font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
             }
             // Timer: anel que esvazia + tempo restante.
@@ -586,6 +609,9 @@ export component Island inherits Window {
                 padding-right: 10px;
                 spacing: 10px;
                 alignment: stretch;
+                // Câmera (verde) e microfone (laranja) em uso, como no iPhone.
+                if root.cam-app != "": Rectangle { y: (parent.height - 7px) / 2; width: 7px; height: 7px; border-radius: 3.5px; background: #34c759; }
+                if root.mic-app != "": Rectangle { y: (parent.height - 7px) / 2; width: 7px; height: 7px; border-radius: 3.5px; background: #ff9f0a; }
                 // Ícone: logo do Spotify, nota musical (outro player) ou relógio.
                 if root.show-music && root.spotify: SpotifyLogo {
                     size: 24px;
@@ -803,11 +829,11 @@ export component Island inherits Window {
                     return accept;
                 }
                 if (event.text == Key.LeftArrow) {
-                    root.go-page(max(0, root.page - 1));
+                    root.go-page(root.unvis(max(0, root.vis(root.page) - 1)));
                     return accept;
                 }
                 if (event.text == Key.RightArrow) {
-                    root.go-page(min(4, root.page + 1));
+                    root.go-page(root.unvis(min(5, root.vis(root.page) + 1)));
                     return accept;
                 }
                 reject
@@ -821,31 +847,167 @@ export component Island inherits Window {
                     }
                     if (e.kind == PointerEventKind.up) {
                         if (self.mouse-x - self.start-x < -60px) {
-                            root.go-page(min(4, root.page + 1));
+                            root.go-page(root.unvis(min(5, root.vis(root.page) + 1)));
                         } else if (self.mouse-x - self.start-x > 60px) {
-                            root.go-page(max(0, root.page - 1));
+                            root.go-page(root.unvis(max(0, root.vis(root.page) - 1)));
                         }
                     }
                 }
                 scroll-event(e) => {
                     if (e.delta-y < 0 || e.delta-x < 0) {
-                        root.go-page(min(4, root.page + 1));
+                        root.go-page(root.unvis(min(5, root.vis(root.page) + 1)));
                     } else if (e.delta-y > 0 || e.delta-x > 0) {
-                        root.go-page(max(0, root.page - 1));
+                        root.go-page(root.unvis(max(0, root.vis(root.page) - 1)));
                     }
                     accept
                 }
                 Rectangle {
-                    x: -root.page * parent.width;
+                    x: -root.vis(root.page) * parent.width;
                     y: 0;
-                    width: parent.width * 5;
+                    width: parent.width * 6;
                     height: parent.height;
                     animate x { duration: root.slide ? 380ms : 0ms; easing: cubic-bezier(0.25, 1.1, 0.32, 1); }
-                    // Página 1: música (capa, nome, artista, tempo e controles).
+                    // Início: um pouco de tudo; cada cartão leva para a página dele.
                     Rectangle {
                         x: 0;
                         y: 0;
-                        width: parent.width / 5;
+                        width: parent.width / 6;
+                        height: 262px;
+                        HorizontalLayout {
+                            x: 24px;
+                            y: 30px;
+                            width: parent.width - 48px;
+                            height: 22px;
+                            spacing: 12px;
+                            Text { text: "Início"; color: root.ink; font-size: 15px; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
+                            if root.cam-app != "": HorizontalLayout {
+                                spacing: 5px;
+                                Rectangle { y: 7px; width: 8px; height: 8px; border-radius: 4px; background: #34c759; }
+                                Text { text: "Câmera: " + root.cam-app; color: root.ink.with-alpha(0.75); font-size: 11px; vertical-alignment: center; }
+                            }
+                            if root.mic-app != "": HorizontalLayout {
+                                spacing: 5px;
+                                Rectangle { y: 7px; width: 8px; height: 8px; border-radius: 4px; background: #ff9f0a; }
+                                Text { text: "Microfone: " + root.mic-app; color: root.ink.with-alpha(0.75); font-size: 11px; vertical-alignment: center; }
+                            }
+                        }
+                        GridLayout {
+                            x: 24px;
+                            y: 62px;
+                            width: parent.width - 48px;
+                            height: 176px;
+                            spacing: 10px;
+                            // Música.
+                            Rectangle {
+                                row: 0; col: 0;
+                                border-radius: 16px;
+                                background: music-touch.has-hover ? root.ink.with-alpha(0.14) : root.ink.with-alpha(0.08);
+                                HorizontalLayout {
+                                    padding: 12px;
+                                    spacing: 12px;
+                                    Rectangle {
+                                        width: 58px;
+                                        height: 58px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 10px;
+                                        clip: true;
+                                        background: root.accent.with-alpha(0.35);
+                                        if root.has-cover: Image { width: parent.width; height: parent.height; source: root.cover; image-fit: ImageFit.cover; }
+                                        if !root.has-cover: Glyph { text: "\u{EC4F}"; color: root.ink.with-alpha(0.8); font-size: 20px; }
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        Text { text: root.has-track ? "Tocando" : "Música"; color: root.ink.with-alpha(0.55); font-size: 11px; }
+                                        Text { text: root.has-track ? root.song-title : "Nada tocando"; color: root.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+                                        Text { text: root.has-track ? root.artist : "Abra o Spotify"; color: root.ink.with-alpha(0.6); font-size: 11px; overflow: elide; }
+                                        Rectangle {
+                                            height: 4px;
+                                            border-radius: 2px;
+                                            background: root.ink.with-alpha(0.15);
+                                            Rectangle { x: 0; width: parent.width * root.progress; border-radius: 2px; background: root.ink; }
+                                        }
+                                    }
+                                }
+                                music-touch := TouchArea { clicked => { root.go-page(0); } }
+                            }
+                            // Agenda.
+                            Rectangle {
+                                row: 0; col: 1;
+                                border-radius: 16px;
+                                background: cal-touch.has-hover ? root.ink.with-alpha(0.14) : root.ink.with-alpha(0.08);
+                                VerticalLayout {
+                                    padding: 14px;
+                                    spacing: 3px;
+                                    alignment: center;
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        Glyph { text: "\u{E787}"; color: root.ink.with-alpha(0.55); font-size: 11px; }
+                                        Text { text: root.h-date; color: root.ink.with-alpha(0.55); font-size: 11px; horizontal-stretch: 1; }
+                                    }
+                                    Text { text: root.h-event; color: root.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+                                    Text { text: root.h-event-more; color: root.ink.with-alpha(0.6); font-size: 11px; overflow: elide; }
+                                }
+                                cal-touch := TouchArea { clicked => { root.go-page(1); } }
+                            }
+                            // Baterias.
+                            Rectangle {
+                                row: 1; col: 0;
+                                border-radius: 16px;
+                                background: root.ink.with-alpha(0.08);
+                                VerticalLayout {
+                                    padding: 14px;
+                                    spacing: 4px;
+                                    alignment: center;
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        Glyph { text: root.bat-charging ? "\u{E83E}" : "\u{E859}"; color: root.ink.with-alpha(0.55); font-size: 11px; }
+                                        Text { text: "Bateria"; color: root.ink.with-alpha(0.55); font-size: 11px; horizontal-stretch: 1; }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 22px;
+                                        VerticalLayout {
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                alignment: start;
+                                                Text { text: root.has-bat ? root.bat-pct + "%" : "Na tomada"; color: root.bat-pct <= 15 && root.has-bat && !root.bat-charging ? #ff453a : root.ink; font-size: 13px; font-weight: 600; }
+                                                if root.bat-charging: Text { text: "carregando"; color: #34c759; font-size: 11px; vertical-alignment: center; }
+                                            }
+                                            Text { text: "Notebook"; color: root.ink.with-alpha(0.6); font-size: 11px; }
+                                        }
+                                        VerticalLayout {
+                                            Text { text: root.hs-name == "" ? "—" : root.hs-pct >= 0 ? root.hs-pct + "%" : "Conectado"; color: root.ink; font-size: 13px; font-weight: 600; }
+                                            Text { text: root.hs-name == "" ? "Nenhum fone" : root.hs-name; color: root.ink.with-alpha(0.6); font-size: 11px; overflow: elide; }
+                                        }
+                                    }
+                                }
+                            }
+                            // Última mensagem.
+                            Rectangle {
+                                row: 1; col: 1;
+                                border-radius: 16px;
+                                background: msg-touch.has-hover ? root.ink.with-alpha(0.14) : root.ink.with-alpha(0.08);
+                                VerticalLayout {
+                                    padding: 14px;
+                                    spacing: 3px;
+                                    alignment: center;
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        Glyph { text: "\u{E8BD}"; color: root.ink.with-alpha(0.55); font-size: 11px; }
+                                        Text { text: root.h-msg-src; color: root.ink.with-alpha(0.55); font-size: 11px; horizontal-stretch: 1; overflow: elide; }
+                                    }
+                                    Text { text: root.h-msg-sender; color: root.ink; font-size: 13px; font-weight: 600; overflow: elide; }
+                                    Text { text: root.h-msg-text; color: root.ink.with-alpha(0.6); font-size: 11px; overflow: elide; }
+                                }
+                                msg-touch := TouchArea { clicked => { root.go-page(2); } }
+                            }
+                        }
+                    }
+                    // Página 1: música (capa, nome, artista, tempo e controles).
+                    Rectangle {
+                        x: parent.width / 6;
+                        y: 0;
+                        width: parent.width / 6;
                         height: root.karaoke ? 376px : 214px;
                         if !root.karaoke: HorizontalLayout {
                             padding: 22px;
@@ -1015,7 +1177,8 @@ export component Island inherits Window {
                             }
                             VerticalLayout {
                                 x: 24px;
-                                y: 78px;
+                                y: 78px + root.k-shift;
+                                animate y { duration: root.k-jump ? 0ms : 420ms; easing: cubic-bezier(0.22, 1, 0.36, 1); }
                                 width: parent.width - 48px;
                                 height: 250px;
                                 spacing: 8px;
@@ -1131,9 +1294,9 @@ export component Island inherits Window {
                     }
                     // Página 2: calendário.
                     Rectangle {
-                        x: parent.width / 5;
+                        x: parent.width * 2 / 6;
                         y: 0;
-                        width: parent.width / 5;
+                        width: parent.width / 6;
                         height: 340px;
                     HorizontalLayout {
                         padding: 18px;
@@ -1327,9 +1490,9 @@ export component Island inherits Window {
                     }
                     // Página 3: mensagens (WhatsApp e e-mail, trocando pela aba de cima).
                     Rectangle {
-                        x: parent.width * 2 / 5;
+                        x: parent.width * 3 / 6;
                         y: 0;
-                        width: parent.width / 5;
+                        width: parent.width / 6;
                         height: 340px;
                         VerticalLayout {
                             padding: 22px;
@@ -1413,9 +1576,9 @@ export component Island inherits Window {
                     }
                     // Página 4: área de transferência (cartões e preview que adapta a ilha).
                     Rectangle {
-                        x: parent.width * 3 / 5;
+                        x: parent.width * 4 / 6;
                         y: 0;
-                        width: parent.width / 5;
+                        width: parent.width / 6;
                         height: 520px;
                         // ── Lista de cartões ──
                         if root.clip-open < 0: VerticalLayout {
@@ -1578,9 +1741,9 @@ export component Island inherits Window {
                     }
                     // Página 5: configurações e apps do "abre".
                     Rectangle {
-                        x: parent.width * 4 / 5;
+                        x: parent.width * 5 / 6;
                         y: 0;
-                        width: parent.width / 5;
+                        width: parent.width / 6;
                         height: 698px;
                         HorizontalLayout {
                             padding: 20px;
@@ -1756,15 +1919,15 @@ export component Island inherits Window {
                 height: 8px;
                 alignment: center;
                 spacing: 8px;
-                for i in 5: Rectangle {
-                    width: root.page == i ? 18px : 7px;
+                for i in 6: Rectangle {
+                    width: root.vis(root.page) == i ? 18px : 7px;
                     height: 7px;
                     border-radius: 3.5px;
                     // A bolinha do WhatsApp fica verde quando há mensagem não lida.
-                    background: i == 2 && root.wa-unread + root.mail-unread > 0 && root.page != 2 ? (root.wa-unread > 0 ? #25d366 : #4f8cff) : root.page == i ? root.ink : root.ink.with-alpha(0.35);
+                    background: i == 3 && root.wa-unread + root.mail-unread > 0 && root.page != 2 ? (root.wa-unread > 0 ? #25d366 : #4f8cff) : root.vis(root.page) == i ? root.ink : root.ink.with-alpha(0.35);
                     animate width, background { duration: 250ms; }
                     TouchArea {
-                        clicked => { root.go-page(i); }
+                        clicked => { root.go-page(root.unvis(i)); }
                     }
                 }
             }

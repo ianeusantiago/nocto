@@ -98,6 +98,8 @@ pub enum OpenPage {
     Calendar,
     #[serde(rename = "mensagens")]
     Messages,
+    #[serde(rename = "inicio")]
+    Home,
 }
 
 impl OpenPage {
@@ -106,7 +108,8 @@ impl OpenPage {
             OpenPage::Auto => OpenPage::Music,
             OpenPage::Music => OpenPage::Calendar,
             OpenPage::Calendar => OpenPage::Messages,
-            OpenPage::Messages => OpenPage::Auto,
+            OpenPage::Messages => OpenPage::Home,
+            OpenPage::Home => OpenPage::Auto,
         }
     }
     pub fn label(self) -> &'static str {
@@ -115,6 +118,7 @@ impl OpenPage {
             OpenPage::Music => "Música",
             OpenPage::Calendar => "Agenda",
             OpenPage::Messages => "Mensagens",
+            OpenPage::Home => "Início",
         }
     }
     /// Página (0 música, 1 agenda, 2 mensagens) conforme a escolha e o estado.
@@ -126,6 +130,7 @@ impl OpenPage {
             OpenPage::Music => 0,
             OpenPage::Calendar => 1,
             OpenPage::Messages => 2,
+            OpenPage::Home => 5,
         }
     }
 }

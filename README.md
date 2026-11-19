@@ -88,6 +88,9 @@ Não instala nada nem pede permissão de administrador. Para remover, apague o e
 | ⏱️ **Timer** | `timer 3 min`, `bota um timer de 25 minutos`, `timer 1h30` (ou por voz). A pílula conta o tempo com um anel; no fim, som e aviso. `cancela o timer` para. |
 | 📋 **Área de transferência** | `Alt + Shift + V` ou `copiados`. Histórico do que você copia (texto, links, cores, código colorido, imagens, arquivos): clique para ver em tamanho grande, copiar de novo, fixar ou apagar. A pílula avisa "Copiado". |
 | 🎤 **Karaokê** | Na página de música, toque no microfone: a letra aparece sincronizada (LRCLIB), linha por linha, na cor do momento do dia (ou a que você escolher em Configurações). |
+| 🏠 **Início** | Primeira página do painel: música, agenda de hoje, bateria do notebook e do fone Bluetooth e a última mensagem. Clique em um cartão para ir à página dele. |
+| 🟢 **Câmera e microfone** | Bolinha verde (câmera) e laranja (microfone) na pílula enquanto algum app usa, com o nome do app no Início. |
+| 🔋 **Bateria e fones** | Aviso ao ligar o carregador, ao conectar um fone (com a bateria dele) e com bateria baixa (20% e 10%). |
 | 🗓️ **Agenda** | Escolha o dia, digite `14:00 reunião` e Enter. Clique no item para concluir. |
 | 💬 **Mensagens** | WhatsApp e e-mail (Outlook, ou Gmail pelo navegador) pelas notificações do Windows. Clique para abrir. |
 | ⌨️ **Comandos** | `abre brave` · `abre github.com` · `abre C:\Projetos` · `toca <música>` · `toca playlist <nome>` · `toca álbum <nome> by <artista>` · `coloca na fila <música>` · `pausa` · `próxima` · `agenda` |
