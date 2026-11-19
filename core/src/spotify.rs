@@ -458,6 +458,91 @@ pub fn play_playlist(cfg: &Config, name: &str) -> Result<String, String> {
     Ok(format!("Tocando a playlist {}", playlist.name))
 }
 
+/// Escolhe o álbum: nome igual ganha de "contém"; o artista pedido conta muito.
+pub fn pick_album(json: &str, query: &str) -> Option<Playlist> {
+    let v: Value = serde_json::from_str(json).ok()?;
+    let (title, artist) = split_query(query);
+    let tc = title.replace(' ', "");
+    let mut best: Option<(i32, Playlist)> = None;
+    for item in v["albums"]["items"].as_array()? {
+        let (Some(name), Some(uri)) = (item["name"].as_str(), item["uri"].as_str()) else { continue };
+        let n = norm(name).replace(' ', "");
+        let mut score = if n == tc {
+            300
+        } else if n.starts_with(&tc) {
+            // "Late Registration (Deluxe)"
+            250
+        } else if n.contains(&tc) {
+            150
+        } else {
+            continue;
+        };
+        let artists: Vec<String> = item["artists"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str()).map(norm).collect()).unwrap_or_default();
+        if let Some(a) = &artist {
+            if artists.iter().any(|x| x == a || x.contains(a.as_str())) {
+                score += 200;
+            } else {
+                score -= 100;
+            }
+        }
+        if item["album_type"].as_str() == Some("album") {
+            score += 10;
+        }
+        if score > 0 && best.as_ref().is_none_or(|(s, _)| score > *s) {
+            let by = item["artists"][0]["name"].as_str().unwrap_or("");
+            let label = if by.is_empty() { name.to_string() } else { format!("{name} — {by}") };
+            best = Some((score, Playlist { name: label, uri: uri.into() }));
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+/// Toca um álbum inteiro pelo nome (e artista, se vier). Retorna "Tocando o álbum …".
+pub fn play_album(cfg: &Config, query: &str) -> Result<String, String> {
+    if cfg.client_id.is_empty() {
+        return Err(missing_id());
+    }
+    let auth = format!("Bearer {}", access_token(cfg)?);
+    let (title, artist) = split_query(query);
+    let find = |q: &str| -> Result<Option<Playlist>, String> {
+        let json = get(&auth, &format!("https://api.spotify.com/v1/search?type=album&limit=10&q={}", enc(q)))?;
+        Ok(pick_album(&json, query))
+    };
+    let mut album = None;
+    if let Some(a) = &artist {
+        album = find(&format!("album:\"{title}\" artist:\"{a}\""))?;
+    }
+    if album.is_none() {
+        album = find(query)?;
+    }
+    let album = album.ok_or_else(|| format!("não achei o álbum \"{query}\" no Spotify"))?;
+    play_context(&auth, &album.uri)?;
+    Ok(format!("Tocando o álbum {}", album.name))
+}
+
+/// Manda o Spotify tocar um álbum/playlist (no aparelho ativo ou no computador).
+fn play_context(auth: &str, uri: &str) -> Result<(), String> {
+    let device = match active_device(&get(auth, "https://api.spotify.com/v1/me/player")?) {
+        Some(id) => Some(id),
+        None => pick_device(&get(auth, "https://api.spotify.com/v1/me/player/devices")?),
+    };
+    let url = match &device {
+        Some(id) => format!("https://api.spotify.com/v1/me/player/play?device_id={}", enc(id)),
+        None => "https://api.spotify.com/v1/me/player/play".into(),
+    };
+    let mut resp = agent()
+        .put(&url)
+        .header("Authorization", auth)
+        .header("Content-Type", "application/json")
+        .send(serde_json::json!({ "context_uri": uri }).to_string())
+        .map_err(|e| format!("sem conexão: {e}"))?;
+    let status = resp.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(play_error(status, &resp.body_mut().read_to_string().unwrap_or_default()));
+    }
+    Ok(())
+}
+
 /// Aparelho do player atual, se houver um tocando ou pausado.
 pub fn active_device(json: &str) -> Option<String> {
     let v: Value = serde_json::from_str(json).ok()?;
@@ -639,5 +724,18 @@ mod playlist_tests {
     fn asks_for_playlist_permission() {
         assert!(auth_url("cid", "c", "s").contains("playlist-read-private"));
         assert!(play_error(403, r#"{"error":{"message":"Insufficient client scope"}}"#).contains("conectar spotify"));
+    }
+
+    #[test]
+    fn picks_album() {
+        let json = r#"{"albums":{"items":[
+            {"name":"Late Orchestration","uri":"u1","album_type":"album","artists":[{"name":"Kanye West"}]},
+            {"name":"Late Registration (Deluxe)","uri":"u2","album_type":"album","artists":[{"name":"Kanye West"}]},
+            {"name":"Late Registration","uri":"u3","album_type":"album","artists":[{"name":"Tribute Band"}]}
+        ]}}"#;
+        let a = pick_album(json, "late registration by kanye west").unwrap();
+        assert_eq!(a.uri, "u2");
+        assert_eq!(a.name, "Late Registration (Deluxe) — Kanye West");
+        assert!(pick_album(json, "graduation by kanye west").is_none());
     }
 }

@@ -7,6 +7,8 @@ pub enum Command {
     OpenFolder(String),
     SpotifyPlay(String),
     SpotifyPlaylist(String),
+    /// "toca álbum late registration by kanye west".
+    SpotifyAlbum(String),
     SpotifyPause,
     SpotifyNext,
     SpotifyLogin,
@@ -98,6 +100,13 @@ pub fn parse(input: &str) -> Command {
     }
     if PLAY.contains(&verb) {
         let lower = rest.to_lowercase();
+        for prefix in ["álbum ", "album ", "o álbum ", "o album ", "disco ", "o disco "] {
+            if let Some(name) = lower.strip_prefix(prefix) {
+                if !name.trim().is_empty() {
+                    return Command::SpotifyAlbum(name.trim().to_string());
+                }
+            }
+        }
         for prefix in ["playlist ", "a playlist ", "minha playlist ", "a minha playlist "] {
             if let Some(name) = lower.strip_prefix(prefix) {
                 if !name.trim().is_empty() {
@@ -203,6 +212,9 @@ mod playlist_tests {
     #[test]
     fn playlist_command() {
         assert_eq!(parse("toca playlist only day"), Command::SpotifyPlaylist("only day".into()));
+        assert_eq!(parse("toca álbum Late Registration by Kanye West"), Command::SpotifyAlbum("late registration by kanye west".into()));
+        assert_eq!(parse("toca o album ye"), Command::SpotifyAlbum("ye".into()));
+        assert_eq!(parse("toca álbum"), Command::SpotifyPlay("álbum".into()));
         assert_eq!(parse("Toca a playlist Only Day"), Command::SpotifyPlaylist("only day".into()));
         assert_eq!(parse("tocar minha playlist only day"), Command::SpotifyPlaylist("only day".into()));
         assert_eq!(parse("toca playlist"), Command::SpotifyPlay("playlist".into()));
